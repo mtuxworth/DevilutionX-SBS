@@ -555,6 +555,12 @@ struct GraphicsOptions : OptionCategoryBase {
 #if !defined(USE_SDL1) && !defined(USE_SDL3)
 	/** @brief Full side-by-side stereoscopic 3D output for XR glasses. */
 	OptionEntryBoolean sideBySide3D;
+	/** @brief Strength of the side-by-side 3D effect, in tenths of a percent of the image width. */
+	OptionEntryInt<int> sideBySideDepth;
+	/** @brief How far down the view the side-by-side 3D screen plane sits, in percent. */
+	OptionEntryInt<int> sideBySideScreenPlane;
+	/** @brief Swap the side-by-side 3D eye images. */
+	OptionEntryBoolean sideBySideSwapEyes;
 #endif
 	/** @brief Limit frame rate either for vsync or CPU load. */
 	OptionEntryEnum<FrameRateControl> frameRateControl;

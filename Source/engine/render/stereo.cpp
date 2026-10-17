@@ -15,6 +15,19 @@ constexpr int16_t EmptyDepth = std::numeric_limits<int16_t>::min();
 
 std::vector<int16_t> DepthBuffer;
 std::vector<uint8_t> TileMask;
+
+struct OverlayRegion {
+	int x;
+	int y;
+	int width;
+	int height;
+	int16_t depth;
+};
+/** Areas of overlay pixels that belong to something in the world, registered after the world is drawn. */
+std::vector<OverlayRegion> OverlayRegions;
+/** The frame just after labels were drawn; later drawing (panels, cursor) differs from it and stays flat. */
+std::vector<uint8_t> OverlaySnapshot;
+bool OverlaySnapshotValid;
 std::vector<uint8_t> WorldSnapshot;
 int WorldPitch;
 int WorldWidth;
@@ -31,6 +44,8 @@ constexpr int SubPixels = 4;
 struct RowScratch {
 	std::vector<uint8_t> color;
 	std::vector<int16_t> depth;
+	/** Overlay pixels already placed at a world depth in this row. */
+	std::vector<uint8_t> handled;
 };
 
 void UpscaleDepth(int offsetX, int width, int height)
@@ -209,6 +224,8 @@ void BeginWorld(uint8_t *base, int pitch, int width, int height)
 	WorldHeight = height;
 	DepthBuffer.resize(static_cast<size_t>(pitch) * height);
 	TileMask.assign(static_cast<size_t>(pitch) * height, 0);
+	OverlayRegions.clear();
+	OverlaySnapshotValid = false;
 	for (int y = 0; y < height; ++y) {
 		std::fill_n(DepthBuffer.data() + static_cast<ptrdiff_t>(y) * pitch, width, Nearness(y, FloorFootY));
 	}
@@ -272,9 +289,36 @@ void Compose(const uint8_t *frame, int pitch, int width, int height, const RgbFr
 			WarpRow(world, depth, width, zeroPlane, shiftPerUnit, leftSign, scratch, out, leftEye);
 			WarpRow(world, depth, width, zeroPlane, shiftPerUnit, -leftSign, scratch, out, rightEye);
 
-			// Anything drawn on top of the world (HUD, labels, cursor) stays on the screen plane.
+			// Labels and damage numbers sit at the depth of what they belong to. They're whole-pixel shifted,
+			// which is fine for flat text at a single depth.
+			scratch.handled.assign(width, 0);
+			if (OverlaySnapshotValid) {
+				const uint8_t *overlay = OverlaySnapshot.data() + static_cast<ptrdiff_t>(y) * pitch;
+				for (const OverlayRegion &region : OverlayRegions) {
+					if (y < region.y || y >= region.y + region.height)
+						continue;
+					const int32_t subShift = ((static_cast<int32_t>(region.depth) - zeroPlane) * shiftPerUnit + (1 << 15)) >> 16;
+					const int shift = (subShift >= 0 ? subShift + SubPixels / 2 : subShift - SubPixels / 2) / SubPixels;
+					const int begin = std::max(region.x, 0);
+					const int end = std::min(region.x + region.width, width);
+					for (int x = begin; x < end; ++x) {
+						if (scratch.handled[x] != 0 || src[x] == world[x] || src[x] != overlay[x])
+							continue;
+						scratch.handled[x] = 1;
+						const uint32_t color = PackIndex(out, src[x]);
+						const int leftX = x + leftSign * shift;
+						const int rightX = x - leftSign * shift;
+						if (leftX >= 0 && leftX < width)
+							leftEye[leftX] = color;
+						if (rightX >= 0 && rightX < width)
+							rightEye[rightX] = color;
+					}
+				}
+			}
+
+			// Everything else drawn on top of the world (HUD, panels, cursor) stays on the screen plane.
 			for (int x = 0; x < width; ++x) {
-				if (src[x] != world[x])
+				if (src[x] != world[x] && scratch.handled[x] == 0)
 					leftEye[x] = rightEye[x] = PackIndex(out, src[x]);
 			}
 		}
@@ -367,16 +411,20 @@ bool SaveDepthImage(const char *path)
 	return true;
 }
 
-float AdjustStrength(float delta)
+void AddOverlayDepth(int x, int y, int width, int height, int footY)
 {
-	Settings.strength = std::clamp(Settings.strength + delta, 0.0F, 0.08F);
-	return Settings.strength;
+	if (!Settings.enabled || Writer.base == nullptr || width <= 0 || height <= 0)
+		return;
+	OverlayRegions.push_back(OverlayRegion { x, y, width, height, Nearness(footY, FloorFootY) });
 }
 
-float AdjustConvergence(float delta)
+void SnapshotOverlays()
 {
-	Settings.convergence = std::clamp(Settings.convergence + delta, -0.5F, 1.5F);
-	return Settings.convergence;
+	if (!Settings.enabled || !WorldValid || OverlayRegions.empty())
+		return;
+	OverlaySnapshot.resize(static_cast<size_t>(WorldPitch) * WorldHeight);
+	std::memcpy(OverlaySnapshot.data(), Writer.base, OverlaySnapshot.size());
+	OverlaySnapshotValid = true;
 }
 
 } // namespace devilution::stereo

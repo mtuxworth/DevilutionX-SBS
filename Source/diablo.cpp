@@ -520,27 +520,37 @@ bool HandleStereoKey(SDL_Keycode vkey)
 		stereo::Settings.verticalOffset = std::clamp(stereo::Settings.verticalOffset + (vkey == SDLK_PAGEDOWN ? 1 : -1), -20, 20);
 		EventPlrMsg(StrCat("3D right eye height: ", stereo::Settings.verticalOffset, " px"));
 		return true;
+	// Depth, screen plane and eye swap go through the Graphics settings so they're saved for next time.
 	case SDLK_UP:
 	case SDLK_DOWN: {
-		const float strength = stereo::AdjustStrength(vkey == SDLK_UP ? 0.002F : -0.002F);
-		const int tenths = static_cast<int>(strength * 1000.0F + 0.5F);
-		EventPlrMsg(StrCat("3D depth: ", tenths / 10, ".", tenths % 10, "%"));
+		OptionEntryInt<int> &depth = GetOptions().Graphics.sideBySideDepth;
+		stereo::Settings.strengthFromCommandLine = false;
+		depth.SetValue(std::clamp(*depth + (vkey == SDLK_UP ? 2 : -2), 0, 80));
+		if (!demo::IsRunning()) SaveOptions();
+		EventPlrMsg(StrCat("3D depth: ", *depth / 10, ".", *depth % 10, "%"));
 		return true;
 	}
 	case SDLK_LEFT:
 	case SDLK_RIGHT: {
-		const float convergence = stereo::AdjustConvergence(vkey == SDLK_RIGHT ? 0.05F : -0.05F);
-		EventPlrMsg(StrCat("3D screen plane: ", static_cast<int>(convergence * 100.0F + (convergence < 0 ? -0.5F : 0.5F)), "%"));
+		OptionEntryInt<int> &screenPlane = GetOptions().Graphics.sideBySideScreenPlane;
+		stereo::Settings.convergenceFromCommandLine = false;
+		screenPlane.SetValue(std::clamp(*screenPlane + (vkey == SDLK_RIGHT ? 5 : -5), 0, 100));
+		if (!demo::IsRunning()) SaveOptions();
+		EventPlrMsg(StrCat("3D screen plane: ", *screenPlane, "%"));
 		return true;
 	}
 	case SDLK_END:
 		stereo::DumpNextFrame = true;
 		EventPlrMsg("3D frame saved to sbs_frame.bmp");
 		return true;
-	case SDLK_HOME:
-		stereo::Settings.swapEyes = !stereo::Settings.swapEyes;
+	case SDLK_HOME: {
+		OptionEntryBoolean &swapEyes = GetOptions().Graphics.sideBySideSwapEyes;
+		stereo::Settings.swapEyesFromCommandLine = false;
+		swapEyes.SetValue(!stereo::Settings.swapEyes);
+		if (!demo::IsRunning()) SaveOptions();
 		EventPlrMsg(stereo::Settings.swapEyes ? "3D eyes swapped" : "3D eyes normal");
 		return true;
+	}
 	default:
 		return false;
 	}
@@ -1167,6 +1177,7 @@ void DiabloParseFlags(int argc, char **argv)
 			stereo::Settings.enabled = true;
 		} else if (arg == "--sbs-swap") {
 			stereo::Settings.swapEyes = true;
+			stereo::Settings.swapEyesFromCommandLine = true;
 		} else if (arg == "--sbs-strength" || arg == "--sbs-convergence" || arg == "--sbs-display") {
 			if (i + 1 == argc) {
 				PrintFlagRequiresArgument(arg);
@@ -1177,12 +1188,15 @@ void DiabloParseFlags(int argc, char **argv)
 				PrintFlagMessage(arg, " must be a number");
 				diablo_quit(64);
 			}
-			if (arg == "--sbs-strength")
+			if (arg == "--sbs-strength") {
 				stereo::Settings.strength = parsedParam.value() / 1000.0F;
-			else if (arg == "--sbs-convergence")
+				stereo::Settings.strengthFromCommandLine = true;
+			} else if (arg == "--sbs-convergence") {
 				stereo::Settings.convergence = parsedParam.value() / 100.0F;
-			else
+				stereo::Settings.convergenceFromCommandLine = true;
+			} else {
 				stereo::Settings.display = parsedParam.value();
+			}
 #ifndef DISABLE_DEMOMODE
 		} else if (arg == "--demo") {
 			if (i + 1 == argc) {

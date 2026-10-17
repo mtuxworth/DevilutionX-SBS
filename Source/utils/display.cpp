@@ -105,6 +105,22 @@ int StereoWindowWidth(int eyeWidth)
 }
 
 #if !defined(USE_SDL1) && !defined(USE_SDL3)
+/** Copies the saved 3D tuning into the stereo renderer, except values given on the command line for this run. */
+void ApplyStereoTuning()
+{
+	const GraphicsOptions &graphics = GetOptions().Graphics;
+	if (!stereo::Settings.strengthFromCommandLine)
+		stereo::Settings.strength = *graphics.sideBySideDepth / 1000.0F;
+	if (!stereo::Settings.convergenceFromCommandLine)
+		stereo::Settings.convergence = *graphics.sideBySideScreenPlane / 100.0F;
+	if (!stereo::Settings.swapEyesFromCommandLine)
+		stereo::Settings.swapEyes = *graphics.sideBySideSwapEyes;
+}
+
+const auto OptionChangeHandlerSideBySideDepth = (GetOptions().Graphics.sideBySideDepth.SetValueChangedCallback(ApplyStereoTuning), true);
+const auto OptionChangeHandlerSideBySideScreenPlane = (GetOptions().Graphics.sideBySideScreenPlane.SetValueChangedCallback(ApplyStereoTuning), true);
+const auto OptionChangeHandlerSideBySideSwapEyes = (GetOptions().Graphics.sideBySideSwapEyes.SetValueChangedCallback(ApplyStereoTuning), true);
+
 /**
  * The display to open the game on. In stereo mode this is the one given by --sbs-display,
  * or else the first display at least 3x wider than tall (a full side-by-side mode such as 3840x1080).
@@ -677,6 +693,7 @@ bool SpawnWindow(const char *lpWindowName)
 	// --sbs forces stereo on for this run; otherwise the Graphics setting decides.
 	if (*GetOptions().Graphics.sideBySide3D)
 		stereo::Settings.enabled = true;
+	ApplyStereoTuning();
 #endif
 	if (stereo::Settings.enabled) {
 #if defined(USE_SDL1) || defined(USE_SDL3)

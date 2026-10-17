@@ -11,6 +11,7 @@
 #include <SDL.h>
 #endif
 
+#include "engine/render/stereo.hpp"
 #include "engine/render/text_render.hpp"
 #include "options.h"
 #include "utils/str_cat.hpp"
@@ -85,10 +86,14 @@ void DrawFloatingNumbers(const Surface &out, Point viewPosition, Displacement of
 {
 	for (auto &floatingNum : FloatingQueue) {
 		Displacement worldOffset = viewPosition - floatingNum.startPos;
-		worldOffset = worldOffset.worldToScreen() + offset + Displacement { TILE_WIDTH / 2, -TILE_HEIGHT / 2 } + floatingNum.startOffset;
+		worldOffset = worldOffset.worldToScreen() + offset + Displacement { TILE_WIDTH / 2, -TILE_HEIGHT / 2 };
+		// The tile the number came from, so 3D output can show it at that depth.
+		int footY = worldOffset.deltaY;
+		worldOffset += floatingNum.startOffset;
 
 		if (*GetOptions().Graphics.zoom) {
 			worldOffset *= 2;
+			footY *= 2;
 		}
 
 		Point screenPosition { worldOffset.deltaX, worldOffset.deltaY };
@@ -101,6 +106,8 @@ void DrawFloatingNumbers(const Surface &out, Point viewPosition, Displacement of
 
 		DrawString(out, floatingNum.text, Rectangle { screenPosition, { lineWidth, 0 } },
 		    { .flags = floatingNum.style });
+		// Generous box: the text's exact height depends on the font; only pixels the text changed are used.
+		stereo::AddOverlayDepth(screenPosition.x - 4, screenPosition.y - 8, lineWidth + 8, 56, footY);
 	}
 
 	ClearExpiredNumbers();

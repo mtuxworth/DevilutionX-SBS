@@ -26,9 +26,11 @@ Diablo is drawn as 2D sprites, so there is no 3D scene to render twice. Instead:
    depth, on a grid four times finer than a pixel, then blending back down to
    full colour. Whole-pixel shifts would make the sloping floor jump visibly
    every few rows. Holes that open up are filled from the farther neighbour.
-5. Anything drawn after the world (HUD, panels, inventory, text, item labels,
-   cursor) is found by diffing against a snapshot of the world and stays at
-   screen depth in both eyes.
+5. Anything drawn after the world is found by diffing against a snapshot of the world.
+   Item name labels and floating damage numbers register the screen area they drew
+   and the ground row of what they belong to, and are shifted to that depth. Everything
+   else (HUD, panels, inventory, cursor) stays at screen depth in both eyes; a second
+   snapshot taken right after the labels keeps panels drawn over them flat.
 
 Menus, loading screens and videos are shown flat, duplicated to both eyes.
 
@@ -42,7 +44,12 @@ Turn on **Settings → Graphics → Side-by-Side 3D** from the main menu. It's s
 `diablo.ini` and switches immediately. It can't be changed during a game; quit to the
 main menu first.
 
+The same page has **3D Depth** (tenths of a percent of the image width; 20 = 2%),
+**3D Screen Plane** (percent down the view) and **3D Swap Eyes**. The in-game hotkeys
+below change these settings and save them straight away.
+
 Alternatively, `devilutionx.exe --sbs` forces it on for one run without changing the setting.
+The tuning flags below also apply to that run only, until a hotkey changes the same value.
 
 | Flag | Meaning |
 |---|---|
@@ -85,8 +92,8 @@ Requirements and settings:
 
 ## Known limitations
 
-- Item name labels, floating damage numbers, monster health bars and the automap
-  sit at screen depth rather than in the world.
+- The monster health bar (a fixed bar at the top), the automap and other HUD stay at screen depth.
+- Labels and damage numbers are shifted by whole pixels (they're flat at one depth, so no ripples).
 - The floor still has very faint quarter-pixel depth steps, seen as gentle "hills".
 - Translucent (blended) pixels take the depth of whatever is behind them.
 - SDL3 and SDL1 builds ignore `--sbs` (output stays flat). Only the default SDL2 build is wired up.

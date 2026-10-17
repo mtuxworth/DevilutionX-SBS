@@ -774,6 +774,12 @@ GraphicsOptions::GraphicsOptions()
 #endif
 #if !defined(USE_SDL1) && !defined(USE_SDL3)
     , sideBySide3D("Side-by-Side 3D", OptionEntryFlags::CantChangeInGame | OptionEntryFlags::RecreateUI, "Side-by-Side 3D", "Full side-by-side stereoscopic 3D for XR glasses. Opens on the first display in a side-by-side mode such as 3840x1080.", false)
+    , sideBySideDepth("Side-by-Side 3D Depth", OptionEntryFlags::None, "3D Depth", "Strength of the 3D effect, in tenths of a percent of the image width (20 = 2%). In game: Ctrl+Alt+Up/Down.", 20,
+          { 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40,
+              42, 44, 46, 48, 50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72, 74, 76, 78, 80 })
+    , sideBySideScreenPlane("Side-by-Side 3D Screen Plane", OptionEntryFlags::None, "3D Screen Plane", "How far down the view the screen plane sits, in percent. Things above it look further away than the screen; things below it come out of it. In game: Ctrl+Alt+Left/Right.", 80,
+          { 0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100 })
+    , sideBySideSwapEyes("Side-by-Side 3D Swap Eyes", OptionEntryFlags::None, "3D Swap Eyes", "Swap the left and right eye images. Use if near things look far away. In game: Ctrl+Alt+Home.", false)
 #endif
     , frameRateControl("Frame Rate Control",
           OptionEntryFlags::RecreateUI
@@ -827,6 +833,9 @@ std::vector<OptionEntryBase *> GraphicsOptions::GetEntries()
 #endif
 #if !defined(USE_SDL1) && !defined(USE_SDL3)
 		&sideBySide3D,
+		&sideBySideDepth,
+		&sideBySideScreenPlane,
+		&sideBySideSwapEyes,
 #endif
 		&frameRateControl,
 		&brightness,

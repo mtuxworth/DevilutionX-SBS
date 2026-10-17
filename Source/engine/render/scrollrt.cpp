@@ -1459,6 +1459,7 @@ void DrawView(const Surface &out, Point startPosition)
 	DrawItemNameLabels(out);
 	DrawMonsterHealthBar(out);
 	DrawFloatingNumbers(out, startPosition, offset);
+	stereo::SnapshotOverlays();
 
 	if (IsPlayerInStore() && !qtextflag)
 		DrawSText(out);

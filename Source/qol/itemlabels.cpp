@@ -12,6 +12,7 @@
 #include "engine/point.hpp"
 #include "engine/render/clx_render.hpp"
 #include "engine/render/primitive_render.hpp"
+#include "engine/render/stereo.hpp"
 #include "gmenu.h"
 #include "inv.h"
 #include "options.h"
@@ -30,6 +31,8 @@ struct ItemLabel {
 	int id, width;
 	Point pos;
 	StringOrView text;
+	/** Screen row where the item lies, so 3D output can show the label at the item's depth. */
+	int footY;
 };
 
 std::vector<ItemLabel> labelQueue;
@@ -122,6 +125,7 @@ void AddItemToLabelQueue(int id, Point position)
 		labelCenterOffsets[index].emplace((xBegin + xEnd) / 2);
 	}
 
+	const int footY = *GetOptions().Graphics.zoom ? position.y * 2 : position.y;
 	position.x += *labelCenterOffsets[index];
 	position.y -= TILE_HEIGHT;
 	if (*GetOptions().Graphics.zoom) {
@@ -129,7 +133,7 @@ void AddItemToLabelQueue(int id, Point position)
 	}
 	position.x -= nameWidth / 2;
 	position.y -= LabelHeight();
-	labelQueue.push_back(ItemLabel { id, nameWidth, position, std::move(textOnGround) });
+	labelQueue.push_back(ItemLabel { id, nameWidth, position, std::move(textOnGround), footY });
 }
 
 bool IsMouseOverGameArea()
@@ -207,6 +211,7 @@ void DrawItemNameLabels(const Surface &out)
 			DrawHalfTransparentRectTo(clippedOut, label.pos.x, label.pos.y, label.width, labelHeight);
 		DrawString(clippedOut, label.text, { { label.pos.x + MarginX, label.pos.y + labelMarginTop }, { label.width, labelHeight } },
 		    { .flags = item.getTextColor() });
+		stereo::AddOverlayDepth(label.pos.x, label.pos.y, label.width, labelHeight, label.footY);
 	}
 	labelQueue.clear();
 }

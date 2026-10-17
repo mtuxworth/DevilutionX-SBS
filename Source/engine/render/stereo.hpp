@@ -39,6 +39,10 @@ struct StereoSettings {
 	 * tiles, each with its own foot line, which otherwise makes individual patches stand out.
 	 */
 	bool smoothTiles = true;
+	/** Set by command-line flags, so the saved settings don't replace those values for this run. */
+	bool strengthFromCommandLine = false;
+	bool convergenceFromCommandLine = false;
+	bool swapEyesFromCommandLine = false;
 };
 
 inline StereoSettings Settings;
@@ -209,10 +213,13 @@ void ShiftRightEyeVertically(uint32_t *out, int outPitch, int width, int height,
 /** Saves the last world depth buffer as a greyscale BMP (brighter = nearer). Returns false on failure. */
 bool SaveDepthImage(const char *path);
 
-/** Adjusts strength by delta (clamped) and returns the new value. */
-float AdjustStrength(float delta);
+/**
+ * Gives overlay pixels drawn after the world (item labels, damage numbers) inside the rectangle the depth of
+ * the ground at screen row footY, instead of the screen plane. Call after the world is drawn, before Compose.
+ */
+void AddOverlayDepth(int x, int y, int width, int height, int footY);
 
-/** Adjusts convergence by delta (clamped) and returns the new value. */
-float AdjustConvergence(float delta);
+/** Call once the overlays registered with AddOverlayDepth are drawn; anything drawn after stays on the screen plane. */
+void SnapshotOverlays();
 
 } // namespace devilution::stereo
