@@ -4,6 +4,23 @@
 
 ---
 
+# DevilutionX SBS: side-by-side 3D
+
+**This is an unofficial fork of DevilutionX that adds full side-by-side stereoscopic 3D** for XR glasses in a 3840x1080 side-by-side mode, such as the VITURE Pro.
+
+- Depth for floors, walls, roofs, characters and items. Item labels, damage numbers and the cursor sit at the depth of what they belong to, and the HUD stays flat.
+- Turn it on in **Settings > Graphics > Side-by-Side 3D**. 3D Depth, 3D Screen Plane and 3D Swap Eyes are on the same page; in game, hold Ctrl+Alt and press Up/Down, Left/Right or Home.
+- The game opens on the side-by-side display automatically.
+- Everything else from DevilutionX works as normal, including multiplayer (Client-Server and ZeroTier) with other players on this build.
+
+**[Download the latest SBS release](https://github.com/mtuxworth/DevilutionX-SBS/releases)** (Windows 64-bit). Unzip it into a folder of its own, add your `DIABDAT.MPQ`, and run `devilutionx.exe`.
+
+How it works, all the options, and building it yourself: **[STEREO-SBS.md](STEREO-SBS.md)**.
+
+*The rest of this page is the original DevilutionX README. Its download links point to official DevilutionX releases, which don't include the 3D.*
+
+---
+
 [![Discord Channel](https://img.shields.io/discord/518540764754608128?color=%237289DA&logo=discord&logoColor=%23FFFFFF)](https://discord.gg/devilutionx-518540764754608128)
 [![Downloads](https://img.shields.io/github/downloads/diasurgical/devilutionX/total.svg)](https://github.com/diasurgical/devilutionX/releases/latest)
 [![Codecov](https://codecov.io/gh/diasurgical/devilutionX/branch/master/graph/badge.svg)](https://codecov.io/gh/diasurgical/devilutionX)
