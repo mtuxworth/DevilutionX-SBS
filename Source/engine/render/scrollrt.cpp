@@ -280,6 +280,7 @@ inline void ClxDrawLightBlended(const Surface &out, Point position, ClxSprite cl
 void DrawCursor(const Surface &out)
 {
 	DrawnCursor &cursor = GetDrawnCursor();
+	stereo::SetCursor(0, 0, 0, 0, nullptr, 0, 0);
 	if (IsHardwareCursor()) {
 		SetHardwareCursorVisible(ShouldShowCursor());
 		cursor.rect.size = { 0, 0 };
@@ -328,6 +329,7 @@ void DrawCursor(const Surface &out)
 
 	BlitCursor(cursor.behindBuffer, rect.size.width, &out[rect.position], out.pitch(), rect.size.width, rect.size.height);
 	DrawSoftwareCursor(out, cursPosition + Displacement { 0, cursSize.height - 1 }, pcurs);
+	stereo::SetCursor(rect.position.x, rect.position.y, rect.size.width, rect.size.height, cursor.behindBuffer, MousePosition.x, MousePosition.y);
 }
 
 /**

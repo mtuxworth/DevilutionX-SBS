@@ -28,6 +28,35 @@ std::vector<OverlayRegion> OverlayRegions;
 /** The frame just after labels were drawn; later drawing (panels, cursor) differs from it and stays flat. */
 std::vector<uint8_t> OverlaySnapshot;
 bool OverlaySnapshotValid;
+
+struct CursorState {
+	int x = 0;
+	int y = 0;
+	int width = 0;
+	int height = 0;
+	int hotspotX = 0;
+	int hotspotY = 0;
+	/** What the frame held under the cursor before it was drawn. */
+	std::vector<uint8_t> behind;
+};
+CursorState Cursor;
+
+template <typename Fn>
+void ParallelFor(int count, Fn &&fn)
+{
+	const int threadCount = static_cast<int>(std::clamp(std::thread::hardware_concurrency(), 1U, 8U));
+	const int perThread = (count + threadCount - 1) / threadCount;
+	std::vector<std::thread> workers;
+	for (int t = 1; t < threadCount; ++t) {
+		const int begin = t * perThread;
+		if (begin >= count)
+			break;
+		workers.emplace_back(fn, begin, std::min(begin + perThread, count));
+	}
+	fn(0, std::min(perThread, count));
+	for (std::thread &worker : workers)
+		worker.join();
+}
 std::vector<uint8_t> WorldSnapshot;
 int WorldPitch;
 int WorldWidth;
@@ -80,63 +109,70 @@ void SmoothTileDepth()
 	int16_t *depth = DepthBuffer.data();
 	const uint8_t *mask = TileMask.data();
 
-	// Horizontal pass: per pixel, the sum and count of masked depths in the row window.
-	std::vector<int32_t> rowSum(static_cast<size_t>(width) * height);
-	std::vector<int16_t> rowCount(static_cast<size_t>(width) * height);
-	for (int y = 0; y < height; ++y) {
-		const int16_t *z = depth + static_cast<ptrdiff_t>(y) * pitch;
-		const uint8_t *m = mask + static_cast<ptrdiff_t>(y) * pitch;
-		int32_t *sumOut = rowSum.data() + static_cast<ptrdiff_t>(y) * width;
-		int16_t *countOut = rowCount.data() + static_cast<ptrdiff_t>(y) * width;
-		int32_t sum = 0;
-		int count = 0;
-		for (int x = 0; x < std::min(SmoothRadiusX, width); ++x) {
-			if (m[x] != 0) {
-				sum += z[x];
-				++count;
+	// Horizontal pass: per pixel, the sum and count of masked depths in the row window. Rows split across cores.
+	static std::vector<int32_t> rowSum;
+	static std::vector<int16_t> rowCount;
+	rowSum.resize(static_cast<size_t>(width) * height);
+	rowCount.resize(static_cast<size_t>(width) * height);
+	ParallelFor(height, [&](int firstRow, int endRow) {
+		for (int y = firstRow; y < endRow; ++y) {
+			const int16_t *z = depth + static_cast<ptrdiff_t>(y) * pitch;
+			const uint8_t *m = mask + static_cast<ptrdiff_t>(y) * pitch;
+			int32_t *sumOut = rowSum.data() + static_cast<ptrdiff_t>(y) * width;
+			int16_t *countOut = rowCount.data() + static_cast<ptrdiff_t>(y) * width;
+			int32_t sum = 0;
+			int count = 0;
+			for (int x = 0; x < std::min(SmoothRadiusX, width); ++x) {
+				if (m[x] != 0) {
+					sum += z[x];
+					++count;
+				}
+			}
+			for (int x = 0; x < width; ++x) {
+				const int add = x + SmoothRadiusX;
+				if (add < width && m[add] != 0) {
+					sum += z[add];
+					++count;
+				}
+				const int remove = x - SmoothRadiusX - 1;
+				if (remove >= 0 && m[remove] != 0) {
+					sum -= z[remove];
+					--count;
+				}
+				sumOut[x] = sum;
+				countOut[x] = static_cast<int16_t>(count);
 			}
 		}
-		for (int x = 0; x < width; ++x) {
-			const int add = x + SmoothRadiusX;
-			if (add < width && m[add] != 0) {
-				sum += z[add];
-				++count;
-			}
-			const int remove = x - SmoothRadiusX - 1;
-			if (remove >= 0 && m[remove] != 0) {
-				sum -= z[remove];
-				--count;
-			}
-			sumOut[x] = sum;
-			countOut[x] = static_cast<int16_t>(count);
-		}
-	}
+	});
 
-	// Vertical pass over the row results, sliding a window of rows down each column.
-	std::vector<int32_t> columnSum(width, 0);
-	std::vector<int32_t> columnCount(width, 0);
-	auto addRow = [&](int row, int sign) {
-		const int32_t *s = rowSum.data() + static_cast<ptrdiff_t>(row) * width;
-		const int16_t *c = rowCount.data() + static_cast<ptrdiff_t>(row) * width;
-		for (int x = 0; x < width; ++x) {
-			columnSum[x] += sign * s[x];
-			columnCount[x] += sign * c[x];
+	// Vertical pass over the row results, sliding a window of rows down each column. Columns split across cores.
+	ParallelFor(width, [&](int firstColumn, int endColumn) {
+		const int columns = endColumn - firstColumn;
+		std::vector<int32_t> columnSum(columns, 0);
+		std::vector<int32_t> columnCount(columns, 0);
+		auto addRow = [&](int row, int sign) {
+			const int32_t *s = rowSum.data() + static_cast<ptrdiff_t>(row) * width + firstColumn;
+			const int16_t *c = rowCount.data() + static_cast<ptrdiff_t>(row) * width + firstColumn;
+			for (int i = 0; i < columns; ++i) {
+				columnSum[i] += sign * s[i];
+				columnCount[i] += sign * c[i];
+			}
+		};
+		for (int y = 0; y < std::min(SmoothRadiusY, height); ++y)
+			addRow(y, 1);
+		for (int y = 0; y < height; ++y) {
+			if (y + SmoothRadiusY < height)
+				addRow(y + SmoothRadiusY, 1);
+			if (y - SmoothRadiusY - 1 >= 0)
+				addRow(y - SmoothRadiusY - 1, -1);
+			int16_t *z = depth + static_cast<ptrdiff_t>(y) * pitch + firstColumn;
+			const uint8_t *m = mask + static_cast<ptrdiff_t>(y) * pitch + firstColumn;
+			for (int i = 0; i < columns; ++i) {
+				if (m[i] != 0 && columnCount[i] > 0)
+					z[i] = static_cast<int16_t>(columnSum[i] / columnCount[i]);
+			}
 		}
-	};
-	for (int y = 0; y < std::min(SmoothRadiusY, height); ++y)
-		addRow(y, 1);
-	for (int y = 0; y < height; ++y) {
-		if (y + SmoothRadiusY < height)
-			addRow(y + SmoothRadiusY, 1);
-		if (y - SmoothRadiusY - 1 >= 0)
-			addRow(y - SmoothRadiusY - 1, -1);
-		int16_t *z = depth + static_cast<ptrdiff_t>(y) * pitch;
-		const uint8_t *m = mask + static_cast<ptrdiff_t>(y) * pitch;
-		for (int x = 0; x < width; ++x) {
-			if (m[x] != 0 && columnCount[x] > 0)
-				z[x] = static_cast<int16_t>(columnSum[x] / columnCount[x]);
-		}
-	}
+	});
 }
 
 uint32_t Pack(const RgbFrame &frame, unsigned r, unsigned g, unsigned b)
@@ -270,16 +306,73 @@ void Compose(const uint8_t *frame, int pitch, int width, int height, const RgbFr
 	const auto zeroPlane = static_cast<int16_t>(3.0F * Settings.convergence * worldHeight);
 	const int leftSign = Settings.swapEyes ? -1 : 1;
 
+	// Labels and the cursor are flat, so they move by whole pixels; that's fine at a single depth.
+	const auto wholePixelShift = [&](int16_t z) {
+		const int32_t subShift = ((static_cast<int32_t>(z) - zeroPlane) * shiftPerUnit + (1 << 15)) >> 16;
+		return (subShift >= 0 ? subShift + SubPixels / 2 : subShift - SubPixels / 2) / SubPixels;
+	};
+
+	// The cursor sits at the depth of whatever is under its hotspot. Over the HUD it's left on the screen plane.
+	bool cursorHasDepth = false;
+	int cursorShift = 0;
+	if (hasWorld && Cursor.width > 0 && Cursor.height > 0) {
+		const int hx = Cursor.hotspotX;
+		const int hy = Cursor.hotspotY;
+		if (hx >= 0 && hx < width && hy >= 0 && hy < worldHeight) {
+			const ptrdiff_t i = static_cast<ptrdiff_t>(hy) * pitch + hx;
+			uint8_t under = frame[i];
+			if (hx >= Cursor.x && hx < Cursor.x + Cursor.width && hy >= Cursor.y && hy < Cursor.y + Cursor.height)
+				under = Cursor.behind[static_cast<size_t>(hy - Cursor.y) * Cursor.width + (hx - Cursor.x)];
+			if (under == WorldSnapshot[i]) {
+				cursorHasDepth = true;
+				cursorShift = wholePixelShift(DepthBuffer[i]);
+			} else if (OverlaySnapshotValid && under == OverlaySnapshot[i]) {
+				for (const OverlayRegion &region : OverlayRegions) {
+					if (hx >= region.x && hx < region.x + region.width && hy >= region.y && hy < region.y + region.height) {
+						cursorHasDepth = true;
+						cursorShift = wholePixelShift(region.depth);
+						break;
+					}
+				}
+			}
+		}
+	}
+	const int cursorBegin = std::max(Cursor.x, 0);
+	const int cursorEnd = std::min(Cursor.x + Cursor.width, width);
+
 	const auto composeRows = [&](int firstRow, int endRow) {
 		RowScratch scratch;
 		for (int y = firstRow; y < endRow; ++y) {
 			const uint8_t *src = frame + static_cast<ptrdiff_t>(y) * pitch;
 			uint32_t *leftEye = out.pixels + static_cast<ptrdiff_t>(y) * out.pitch;
 			uint32_t *rightEye = leftEye + width;
+			const uint8_t *behindCursor = cursorHasDepth && y >= Cursor.y && y < Cursor.y + Cursor.height
+			    ? Cursor.behind.data() + static_cast<size_t>(y - Cursor.y) * Cursor.width
+			    : nullptr;
+			const auto drawCursor = [&]() {
+				for (int x = cursorBegin; x < cursorEnd; ++x) {
+					if (src[x] == behindCursor[x - Cursor.x])
+						continue;
+					const uint32_t color = PackIndex(out, src[x]);
+					const int leftX = x + leftSign * cursorShift;
+					const int rightX = x - leftSign * cursorShift;
+					if (leftX >= 0 && leftX < width)
+						leftEye[leftX] = color;
+					if (rightX >= 0 && rightX < width)
+						rightEye[rightX] = color;
+				}
+			};
 
 			if (y >= worldHeight) {
 				for (int x = 0; x < width; ++x)
 					leftEye[x] = rightEye[x] = PackIndex(out, src[x]);
+				if (behindCursor != nullptr) {
+					for (int x = cursorBegin; x < cursorEnd; ++x) {
+						if (src[x] != behindCursor[x - Cursor.x])
+							leftEye[x] = rightEye[x] = PackIndex(out, behindCursor[x - Cursor.x]);
+					}
+					drawCursor();
+				}
 				continue;
 			}
 
@@ -289,16 +382,25 @@ void Compose(const uint8_t *frame, int pitch, int width, int height, const RgbFr
 			WarpRow(world, depth, width, zeroPlane, shiftPerUnit, leftSign, scratch, out, leftEye);
 			WarpRow(world, depth, width, zeroPlane, shiftPerUnit, -leftSign, scratch, out, rightEye);
 
-			// Labels and damage numbers sit at the depth of what they belong to. They're whole-pixel shifted,
-			// which is fine for flat text at a single depth.
 			scratch.handled.assign(width, 0);
+			// Cursor pixels are drawn last at the cursor's depth; at their own spot, show what was behind them.
+			if (behindCursor != nullptr) {
+				for (int x = cursorBegin; x < cursorEnd; ++x) {
+					if (src[x] == behindCursor[x - Cursor.x])
+						continue;
+					scratch.handled[x] = 1;
+					if (behindCursor[x - Cursor.x] != world[x])
+						leftEye[x] = rightEye[x] = PackIndex(out, behindCursor[x - Cursor.x]);
+				}
+			}
+
+			// Labels and damage numbers sit at the depth of what they belong to.
 			if (OverlaySnapshotValid) {
 				const uint8_t *overlay = OverlaySnapshot.data() + static_cast<ptrdiff_t>(y) * pitch;
 				for (const OverlayRegion &region : OverlayRegions) {
 					if (y < region.y || y >= region.y + region.height)
 						continue;
-					const int32_t subShift = ((static_cast<int32_t>(region.depth) - zeroPlane) * shiftPerUnit + (1 << 15)) >> 16;
-					const int shift = (subShift >= 0 ? subShift + SubPixels / 2 : subShift - SubPixels / 2) / SubPixels;
+					const int shift = wholePixelShift(region.depth);
 					const int begin = std::max(region.x, 0);
 					const int end = std::min(region.x + region.width, width);
 					for (int x = begin; x < end; ++x) {
@@ -316,27 +418,18 @@ void Compose(const uint8_t *frame, int pitch, int width, int height, const RgbFr
 				}
 			}
 
-			// Everything else drawn on top of the world (HUD, panels, cursor) stays on the screen plane.
+			// Everything else drawn on top of the world (HUD, panels) stays on the screen plane.
 			for (int x = 0; x < width; ++x) {
 				if (src[x] != world[x] && scratch.handled[x] == 0)
 					leftEye[x] = rightEye[x] = PackIndex(out, src[x]);
 			}
+			if (behindCursor != nullptr)
+				drawCursor();
 		}
 	};
 
-	// Rows are independent, so split them across cores; the calling thread takes the first band.
-	const int threadCount = static_cast<int>(std::clamp(std::thread::hardware_concurrency(), 1U, 8U));
-	const int rowsPerThread = (height + threadCount - 1) / threadCount;
-	std::vector<std::thread> workers;
-	for (int t = 1; t < threadCount; ++t) {
-		const int firstRow = t * rowsPerThread;
-		if (firstRow >= height)
-			break;
-		workers.emplace_back(composeRows, firstRow, std::min(firstRow + rowsPerThread, height));
-	}
-	composeRows(0, std::min(rowsPerThread, height));
-	for (std::thread &worker : workers)
-		worker.join();
+	// Rows are independent, so split them across cores.
+	ParallelFor(height, composeRows);
 
 	ShiftRightEyeVertically(out.pixels, out.pitch, width, height, Settings.verticalOffset);
 }
@@ -416,6 +509,21 @@ void AddOverlayDepth(int x, int y, int width, int height, int footY)
 	if (!Settings.enabled || Writer.base == nullptr || width <= 0 || height <= 0)
 		return;
 	OverlayRegions.push_back(OverlayRegion { x, y, width, height, Nearness(footY, FloorFootY) });
+}
+
+void SetCursor(int x, int y, int width, int height, const uint8_t *behind, int hotspotX, int hotspotY)
+{
+	if (!Settings.enabled || width <= 0 || height <= 0 || behind == nullptr) {
+		Cursor.width = Cursor.height = 0;
+		return;
+	}
+	Cursor.x = x;
+	Cursor.y = y;
+	Cursor.width = width;
+	Cursor.height = height;
+	Cursor.hotspotX = hotspotX;
+	Cursor.hotspotY = hotspotY;
+	Cursor.behind.assign(behind, behind + static_cast<size_t>(width) * height);
 }
 
 void SnapshotOverlays()

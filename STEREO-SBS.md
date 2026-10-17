@@ -28,9 +28,11 @@ Diablo is drawn as 2D sprites, so there is no 3D scene to render twice. Instead:
    every few rows. Holes that open up are filled from the farther neighbour.
 5. Anything drawn after the world is found by diffing against a snapshot of the world.
    Item name labels and floating damage numbers register the screen area they drew
-   and the ground row of what they belong to, and are shifted to that depth. Everything
-   else (HUD, panels, inventory, cursor) stays at screen depth in both eyes; a second
-   snapshot taken right after the labels keeps panels drawn over them flat.
+   and the ground row of what they belong to, and are shifted to that depth. The cursor
+   is shown at the depth of whatever is under its tip (from the copy of the pixels behind
+   it the game already keeps), or flat over the HUD. Everything else (HUD, panels,
+   inventory) stays at screen depth in both eyes; a second snapshot taken right after
+   the labels keeps panels drawn over them flat.
 
 Menus, loading screens and videos are shown flat, duplicated to both eyes.
 
@@ -93,11 +95,11 @@ Requirements and settings:
 ## Known limitations
 
 - The monster health bar (a fixed bar at the top), the automap and other HUD stay at screen depth.
-- Labels and damage numbers are shifted by whole pixels (they're flat at one depth, so no ripples).
+- Labels, damage numbers and the cursor are shifted by whole pixels (they're flat at one depth, so no ripples).
 - The floor still has very faint quarter-pixel depth steps, seen as gentle "hills".
 - Translucent (blended) pixels take the depth of whatever is behind them.
 - SDL3 and SDL1 builds ignore `--sbs` (output stays flat). Only the default SDL2 build is wired up.
   On Windows the game always uses the Direct3D 11 renderer, because Direct3D 9 loses its device when
   the glasses switch between 2D and 3D modes.
-- Cost at 1280x720 per eye: about 4 ms per frame for the eye images (spread across CPU cores) plus
-  about 4 ms for wall/roof smoothing (one core).
+- Cost at 1280x720 per eye: about 4 ms per frame for the eye images plus about 1.3 ms for wall/roof
+  smoothing, both spread across CPU cores.

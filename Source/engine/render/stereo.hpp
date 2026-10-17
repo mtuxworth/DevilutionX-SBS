@@ -222,4 +222,10 @@ void AddOverlayDepth(int x, int y, int width, int height, int footY);
 /** Call once the overlays registered with AddOverlayDepth are drawn; anything drawn after stays on the screen plane. */
 void SnapshotOverlays();
 
+/**
+ * Records the software cursor just drawn: its rectangle, the pixels that were behind it (width * height, row by row)
+ * and its hotspot. The cursor is shown at the depth of whatever is under the hotspot. A zero-sized rectangle clears it.
+ */
+void SetCursor(int x, int y, int width, int height, const uint8_t *behind, int hotspotX, int hotspotY);
+
 } // namespace devilution::stereo
