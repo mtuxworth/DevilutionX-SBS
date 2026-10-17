@@ -90,6 +90,10 @@ Requirements and settings:
 
 ## Running on another PC
 
+Download the release zip from the fork's Releases page and follow its `README.txt`, or build it
+yourself: `build-release.bat` makes a Release build with link-time optimisation and the C runtime
+linked in, then `Packaging\windows\package-sbs-release.ps1` writes the zip to `dist\`.
+
 The build is self-contained apart from the game data. Put these in a folder of their own:
 
 - `devilutionx.exe` from the build folder
@@ -105,7 +109,8 @@ have. If it reports a missing `VCRUNTIME140.dll` or `MSVCP140.dll`, install the
 "Visual C++ Redistributable (x64)" from Microsoft.
 
 Settings and saves live in `%APPDATA%\diasurgical\devilution`, shared with any normal
-DevilutionX install on that PC. To keep them separate:
+DevilutionX install on that PC. To keep them separate, create `config` and `saves` folders next
+to the exe (the game won't create them itself) and run:
 
 ```
 devilutionx.exe --config-dir .\config --save-dir .\saves
