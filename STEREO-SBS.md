@@ -88,6 +88,29 @@ Requirements and settings:
 4. If your eyes strain, lower the depth with Ctrl+Alt+Down. Background disparity above
    about 2% of the image width can exceed eye separation on a large virtual screen.
 
+## Running on another PC
+
+The build is self-contained apart from the game data. Put these in a folder of their own:
+
+- `devilutionx.exe` from the build folder
+- the build's `assets` folder
+- `DIABDAT.MPQ` (your own copy of the game), plus Hellfire's `.mpq` files if you use it
+
+Don't copy the exe into an existing DevilutionX install. The game prefers files inside `.mpq`
+archives over the `assets` folder, so an older release's `devilutionx.mpq` would be used instead
+of the matching assets, and the game crashes once the title screen loads.
+
+The exe needs the Microsoft Visual C++ 2015-2022 runtime (x64), which most Windows PCs already
+have. If it reports a missing `VCRUNTIME140.dll` or `MSVCP140.dll`, install the
+"Visual C++ Redistributable (x64)" from Microsoft.
+
+Settings and saves live in `%APPDATA%\diasurgical\devilution`, shared with any normal
+DevilutionX install on that PC. To keep them separate:
+
+```
+devilutionx.exe --config-dir .\config --save-dir .\saves
+```
+
 ## Known limitations
 
 - The monster health bar (a fixed bar at the top), the automap and other HUD stay at screen depth.
