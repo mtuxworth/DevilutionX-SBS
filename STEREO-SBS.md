@@ -111,6 +111,13 @@ DevilutionX install on that PC. To keep them separate:
 devilutionx.exe --config-dir .\config --save-dir .\saves
 ```
 
+## Multiplayer
+
+Build with networking on (don't pass `-DNONET=ON`) to get the Client-Server (TCP) and ZeroTier
+options. Joining a game requires the exact same DevilutionX version, and this fork is 1.6.0, so
+everyone in the game needs this build (or another 1.6.0 build); release 1.5.x players can't join.
+Side-by-side 3D is purely local, so other players don't need to use it.
+
 ## Known limitations
 
 - The monster health bar (a fixed bar at the top), the automap and other HUD stay at screen depth.
