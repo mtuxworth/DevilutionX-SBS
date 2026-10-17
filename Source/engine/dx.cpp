@@ -32,7 +32,6 @@
 #include "utils/log.hpp"
 #include "utils/sdl_wrap.h"
 #include "utils/static_vector.hpp"
-#include "utils/str_cat.hpp"
 #include "utils/ui_fwd.h"
 
 #ifndef USE_SDL1
@@ -118,7 +117,7 @@ void RenderStereo(SDL_Surface *monoSurface)
 		int eyeHeight = height;
 		SDL_QueryTexture(texture.get(), nullptr, nullptr, &eyeWidth, &eyeHeight);
 		const SDL_Rect leftEye { 0, 0, eyeWidth, eyeHeight };
-		const SDL_Rect rightEye { eyeWidth, stereo::Settings.verticalOffset * eyeHeight / height, eyeWidth, eyeHeight };
+		const SDL_Rect rightEye { eyeWidth, 0, eyeWidth, eyeHeight };
 		if (SDL_RenderCopy(renderer, texture.get(), nullptr, &leftEye) <= -1 || SDL_RenderCopy(renderer, texture.get(), nullptr, &rightEye) <= -1)
 			RecoverLostTextures();
 		return;
@@ -147,18 +146,6 @@ void RenderStereo(SDL_Surface *monoSurface)
 	if (SDL_UpdateTexture(StereoTexture.get(), nullptr, StereoTextureSurface->pixels, StereoTextureSurface->pitch) <= -1
 	    || SDL_RenderCopy(renderer, StereoTexture.get(), nullptr, nullptr) <= -1) {
 		RecoverLostTextures();
-		return;
-	}
-	if (stereo::DumpNextFrame) {
-		stereo::DumpNextFrame = false;
-		char *basePath = SDL_GetBasePath();
-		const std::string path = StrCat(basePath != nullptr ? basePath : "", "sbs_frame.bmp");
-		if (SDL_SaveBMP(StereoTextureSurface.get(), path.c_str()) == 0)
-			Log("Side-by-side 3D: saved {}x{} frame to {}", StereoTextureSurface->w, StereoTextureSurface->h, path);
-		const std::string depthPath = StrCat(basePath != nullptr ? basePath : "", "sbs_depth.bmp");
-		if (stereo::SaveDepthImage(depthPath.c_str()))
-			Log("Side-by-side 3D: saved depth map to {}", depthPath);
-		SDL_free(basePath);
 	}
 }
 #endif

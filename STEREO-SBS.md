@@ -67,11 +67,7 @@ In game, hold Ctrl+Alt and press:
 |---|---|
 | Up / Down | More / less depth |
 | Right / Left | Move the screen plane down / up the view |
-| Page Up / Page Down | Move the right eye's image up / down one pixel (corrects vertical misalignment) |
-| Backspace | Toggle wall/roof depth smoothing (blends the per-tile patches that make up large roofs) |
-| Insert | Toggle the original simple depth model (one ground row per tile), for comparison |
 | Home | Swap eyes |
-| End | Save the composed side-by-side frame to `sbs_frame.bmp` and the depth map (brighter = nearer) to `sbs_depth.bmp` next to the exe |
 
 Requirements and settings:
 - **Upscale must be on** (the default on desktop). Without it the game falls back to flat output.

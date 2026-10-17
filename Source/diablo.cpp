@@ -503,24 +503,13 @@ void ClosePanels()
 	QuestLogIsOpen = false;
 }
 
-/** Ctrl+Alt+Up/Down: depth strength, Ctrl+Alt+Left/Right: screen plane, Ctrl+Alt+PageUp/PageDown: right eye height, Ctrl+Alt+Home: swap eyes. */
+/**
+ * Ctrl+Alt+Up/Down: depth strength, Ctrl+Alt+Left/Right: screen plane, Ctrl+Alt+Home: swap eyes.
+ * These go through the Graphics settings so they're saved for next time.
+ */
 bool HandleStereoKey(SDL_Keycode vkey)
 {
 	switch (vkey) {
-	case SDLK_BACKSPACE:
-		stereo::Settings.smoothTiles = !stereo::Settings.smoothTiles;
-		EventPlrMsg(stereo::Settings.smoothTiles ? "3D wall/roof smoothing: on" : "3D wall/roof smoothing: off");
-		return true;
-	case SDLK_INSERT:
-		stereo::Settings.legacyDepth = !stereo::Settings.legacyDepth;
-		EventPlrMsg(stereo::Settings.legacyDepth ? "3D depth model: old (per tile)" : "3D depth model: new (back edges)");
-		return true;
-	case SDLK_PAGEUP:
-	case SDLK_PAGEDOWN:
-		stereo::Settings.verticalOffset = std::clamp(stereo::Settings.verticalOffset + (vkey == SDLK_PAGEDOWN ? 1 : -1), -20, 20);
-		EventPlrMsg(StrCat("3D right eye height: ", stereo::Settings.verticalOffset, " px"));
-		return true;
-	// Depth, screen plane and eye swap go through the Graphics settings so they're saved for next time.
 	case SDLK_UP:
 	case SDLK_DOWN: {
 		OptionEntryInt<int> &depth = GetOptions().Graphics.sideBySideDepth;
@@ -539,10 +528,6 @@ bool HandleStereoKey(SDL_Keycode vkey)
 		EventPlrMsg(StrCat("3D screen plane: ", *screenPlane, "%"));
 		return true;
 	}
-	case SDLK_END:
-		stereo::DumpNextFrame = true;
-		EventPlrMsg("3D frame saved to sbs_frame.bmp");
-		return true;
 	case SDLK_HOME: {
 		OptionEntryBoolean &swapEyes = GetOptions().Graphics.sideBySideSwapEyes;
 		stereo::Settings.swapEyesFromCommandLine = false;

@@ -753,7 +753,7 @@ void DrawFloorTile(const Surface &out, const Lightmap &lightmap, Point tilePosit
  */
 void DrawItem(const Surface &out, int8_t itemIndex, Point targetBufferPosition, int lightTableIndex)
 {
-	const stereo::FootScope footScope(stereo::FootScope::Flat()); // Items lie on the ground.
+	const stereo::FootScope footScope(stereo::FloorFootY); // Items lie on the ground.
 	const Item &item = Items[itemIndex];
 	const ClxSprite sprite = item.AnimInfo.currentSprite();
 	const Point position = targetBufferPosition + item.getRenderingOffset(sprite);
@@ -843,7 +843,7 @@ void DrawDungeon(const Surface &out, const Lightmap &lightmap, Point tilePositio
 	}
 
 	if (lightTableIndex < LightsMax && bDead != 0) {
-		const stereo::FootScope corpseFootScope(stereo::FootScope::Flat());
+		const stereo::FootScope corpseFootScope(stereo::FloorFootY);
 		const Corpse &corpse = Corpses[(bDead & 0x1F) - 1];
 		const Point position { targetBufferPosition.x - CalculateSpriteTileCenterX(corpse.width), targetBufferPosition.y };
 		const ClxSprite sprite = corpse.spritesForDirection(static_cast<Direction>((bDead >> 5) & 7))[corpse.frame];
@@ -867,7 +867,7 @@ void DrawDungeon(const Surface &out, const Lightmap &lightmap, Point tilePositio
 	}
 
 	if (TileContainsDeadPlayer(tilePosition)) {
-		const stereo::FootScope deadPlayerFootScope(stereo::FootScope::Flat());
+		const stereo::FootScope deadPlayerFootScope(stereo::FloorFootY);
 		DrawDeadPlayer(out, tilePosition, targetBufferPosition, lightTableIndex);
 	}
 	Player *player = PlayerAtPosition(tilePosition);

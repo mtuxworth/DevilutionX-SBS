@@ -1,7 +1,6 @@
 #include "engine/render/stereo.hpp"
 
 #include <algorithm>
-#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <thread>
@@ -281,9 +280,7 @@ void EndWorld(int zoomOffsetX, int zoomWidth)
 	if (zoomWidth > 0) {
 		UpscaleDepth(zoomOffsetX, zoomWidth, WorldHeight);
 	}
-	if (Settings.smoothTiles) {
-		SmoothTileDepth();
-	}
+	SmoothTileDepth();
 
 	WorldSnapshot.resize(static_cast<size_t>(WorldPitch) * WorldHeight);
 	std::memcpy(WorldSnapshot.data(), Writer.base, WorldSnapshot.size());
@@ -430,78 +427,6 @@ void Compose(const uint8_t *frame, int pitch, int width, int height, const RgbFr
 
 	// Rows are independent, so split them across cores.
 	ParallelFor(height, composeRows);
-
-	ShiftRightEyeVertically(out.pixels, out.pitch, width, height, Settings.verticalOffset);
-}
-
-void ShiftRightEyeVertically(uint32_t *out, int outPitch, int width, int height, int offset)
-{
-	offset = std::clamp(offset, -height, height);
-	if (offset == 0)
-		return;
-	const size_t rowBytes = static_cast<size_t>(width) * sizeof(uint32_t);
-	auto rightEyeRow = [&](int y) { return out + static_cast<ptrdiff_t>(y) * outPitch + width; };
-	if (offset > 0) {
-		for (int y = height - 1; y >= offset; --y)
-			std::memcpy(rightEyeRow(y), rightEyeRow(y - offset), rowBytes);
-		for (int y = 0; y < offset; ++y)
-			std::memset(rightEyeRow(y), 0, rowBytes);
-	} else {
-		for (int y = 0; y < height + offset; ++y)
-			std::memcpy(rightEyeRow(y), rightEyeRow(y - offset), rowBytes);
-		for (int y = height + offset; y < height; ++y)
-			std::memset(rightEyeRow(y), 0, rowBytes);
-	}
-}
-
-bool SaveDepthImage(const char *path)
-{
-	if (!WorldValid || WorldHeight <= 0)
-		return false;
-
-	int16_t minZ = std::numeric_limits<int16_t>::max();
-	int16_t maxZ = std::numeric_limits<int16_t>::min();
-	for (int y = 0; y < WorldHeight; ++y) {
-		const int16_t *row = DepthBuffer.data() + static_cast<ptrdiff_t>(y) * WorldPitch;
-		for (int x = 0; x < WorldWidth; ++x) {
-			minZ = std::min(minZ, row[x]);
-			maxZ = std::max(maxZ, row[x]);
-		}
-	}
-	const int range = std::max(1, maxZ - minZ);
-
-	FILE *file = std::fopen(path, "wb");
-	if (file == nullptr)
-		return false;
-	const int rowBytes = (WorldWidth * 3 + 3) & ~3;
-	const uint32_t imageSize = static_cast<uint32_t>(rowBytes) * WorldHeight;
-	const uint32_t fileSize = 54 + imageSize;
-	uint8_t header[54] = { 'B', 'M' };
-	auto put32 = [&header](int offset, uint32_t value) {
-		for (int i = 0; i < 4; ++i)
-			header[offset + i] = static_cast<uint8_t>(value >> (8 * i));
-	};
-	put32(2, fileSize);
-	put32(10, 54);
-	put32(14, 40);
-	put32(18, static_cast<uint32_t>(WorldWidth));
-	put32(22, static_cast<uint32_t>(WorldHeight));
-	header[26] = 1;
-	header[28] = 24;
-	put32(34, imageSize);
-	std::fwrite(header, 1, sizeof(header), file);
-
-	std::vector<uint8_t> line(rowBytes, 0);
-	for (int y = WorldHeight - 1; y >= 0; --y) {
-		const int16_t *row = DepthBuffer.data() + static_cast<ptrdiff_t>(y) * WorldPitch;
-		for (int x = 0; x < WorldWidth; ++x) {
-			const auto grey = static_cast<uint8_t>((row[x] - minZ) * 255 / range);
-			line[x * 3] = line[x * 3 + 1] = line[x * 3 + 2] = grey;
-		}
-		std::fwrite(line.data(), 1, line.size(), file);
-	}
-	std::fclose(file);
-	return true;
 }
 
 void AddOverlayDepth(int x, int y, int width, int height, int footY)

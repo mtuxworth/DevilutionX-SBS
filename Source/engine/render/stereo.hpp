@@ -30,15 +30,6 @@ struct StereoSettings {
 	bool swapEyes = false;
 	/** Display index to use, or -1 to pick the first full side-by-side display. */
 	int display = -1;
-	/** Moves the right eye's image down (positive) or up (negative) by this many game pixels, to correct headset alignment. */
-	int verticalOffset = 0;
-	/** Diagnostic: one foot row per tile at its centre, and items/corpses standing, as in the first version. */
-	bool legacyDepth = false;
-	/**
-	 * Blend depth across neighbouring wall and roof pixels. Large roofs are drawn as patches from a grid of
-	 * tiles, each with its own foot line, which otherwise makes individual patches stand out.
-	 */
-	bool smoothTiles = true;
 	/** Set by command-line flags, so the saved settings don't replace those values for this run. */
 	bool strengthFromCommandLine = false;
 	bool convergenceFromCommandLine = false;
@@ -46,9 +37,6 @@ struct StereoSettings {
 };
 
 inline StereoSettings Settings;
-
-/** Set to save the next composed side-by-side frame as sbs_frame.bmp next to the executable. */
-inline bool DumpNextFrame = false;
 
 /** Foot value that makes every pixel lie on the floor plane. */
 constexpr int FloorFootY = -32768;
@@ -150,14 +138,7 @@ public:
 	}
 	static FootLine BackEdges(int peakY, int peakX)
 	{
-		return Settings.legacyDepth
-		    ? FootLine { peakY + TileHalfWidth / 2, 0, false } // the tile centre row
-		    : FootLine { peakY, peakX, true };
-	}
-	/** Lie flat on the floor, except in legacy depth mode where the current foot is kept. */
-	static FootLine Flat()
-	{
-		return Settings.legacyDepth ? Writer.foot : FootLine {};
+		return FootLine { peakY, peakX, true };
 	}
 	explicit FootScope(const FootLine &foot)
 	    : previous_(Writer.foot)
@@ -206,12 +187,6 @@ struct RgbFrame {
  * Without a valid world snapshot, the frame is duplicated into both eyes.
  */
 void Compose(const uint8_t *frame, int pitch, int width, int height, const RgbFrame &out);
-
-/** Moves the right half of a side-by-side frame down by offset rows (up if negative), filling with black. */
-void ShiftRightEyeVertically(uint32_t *out, int outPitch, int width, int height, int offset);
-
-/** Saves the last world depth buffer as a greyscale BMP (brighter = nearer). Returns false on failure. */
-bool SaveDepthImage(const char *path);
 
 /**
  * Gives overlay pixels drawn after the world (item labels, damage numbers) inside the rectangle the depth of
