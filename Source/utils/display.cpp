@@ -46,6 +46,7 @@
 #include "controls/touch/gamepad.h"
 #include "engine/backbuffer_state.hpp"
 #include "engine/dx.h"
+#include "engine/render/stereo.hpp"
 #include "headless_mode.hpp"
 #include "options.h"
 #include "utils/log.hpp"
@@ -97,6 +98,36 @@ const Rectangle &GetUIRectangle()
 
 namespace {
 
+/** Side-by-side output needs room for both eyes. */
+int StereoWindowWidth(int eyeWidth)
+{
+	return stereo::Settings.enabled ? 2 * eyeWidth : eyeWidth;
+}
+
+#if !defined(USE_SDL1) && !defined(USE_SDL3)
+/**
+ * The display to open the game on. In stereo mode this is the one given by --sbs-display,
+ * or else the first display at least 3x wider than tall (a full side-by-side mode such as 3840x1080).
+ */
+int GameDisplayIndex()
+{
+	if (!stereo::Settings.enabled)
+		return 0;
+	const int numDisplays = SDL_GetNumVideoDisplays();
+	if (stereo::Settings.display >= 0 && stereo::Settings.display < numDisplays)
+		return stereo::Settings.display;
+	for (int i = 0; i < numDisplays; ++i) {
+		SDL_DisplayMode mode;
+		if (SDL_GetDesktopDisplayMode(i, &mode) == 0 && mode.w >= 3 * mode.h) {
+			Log("Side-by-side 3D: using display {} ({}x{})", i, mode.w, mode.h);
+			return i;
+		}
+	}
+	LogError("Side-by-side 3D: no display is in a full side-by-side mode (e.g. 3840x1080); using display 0");
+	return 0;
+}
+#endif
+
 #ifndef USE_SDL1
 void CalculatePreferredWindowSize(int &width, int &height)
 {
@@ -110,8 +141,13 @@ void CalculatePreferredWindowSize(int &width, int &height)
 	if (modePtr == nullptr) ErrSdl();
 	mode = *modePtr;
 #else
-	if (SDL_GetDesktopDisplayMode(0, &mode) != 0) ErrSdl();
+	if (SDL_GetDesktopDisplayMode(GameDisplayIndex(), &mode) != 0) ErrSdl();
 #endif
+
+	if (stereo::Settings.enabled) {
+		// Each eye gets half of a side-by-side display.
+		mode.w /= 2;
+	}
 
 	if (mode.w < mode.h) {
 		std::swap(mode.w, mode.h);
@@ -498,8 +534,44 @@ void SetVideoModeToPrimary(bool fullscreen, int width, int height)
 }
 #endif
 
+#if !defined(USE_SDL1) && !defined(USE_SDL3)
+namespace {
+
+bool StereoFullscreen;
+
+/**
+ * Stereo "fullscreen" is a borderless window one pixel taller than the display. A window that
+ * exactly covers the display gets direct scanout / G-Sync, whose uneven frame timing breaks
+ * stereo fusion on XR glasses even though each eye's image is correct.
+ */
+void SetStereoFullscreen(bool fullscreen)
+{
+	StereoFullscreen = fullscreen;
+	SDL_SetWindowFullscreen(ghMainWnd, 0);
+	const int displayIndex = GameDisplayIndex();
+	if (fullscreen) {
+		SDL_Rect bounds;
+		if (SDL_GetDisplayBounds(displayIndex, &bounds) != 0) ErrSdl();
+		SDL_SetWindowBordered(ghMainWnd, SDL_FALSE);
+		SDL_SetWindowSize(ghMainWnd, bounds.w, bounds.h + 1);
+		SDL_SetWindowPosition(ghMainWnd, bounds.x, bounds.y);
+	} else {
+		const Size windowSize = GetPreferredWindowSize();
+		SDL_SetWindowBordered(ghMainWnd, SDL_TRUE);
+		SDL_SetWindowSize(ghMainWnd, StereoWindowWidth(windowSize.width), windowSize.height);
+		SDL_SetWindowPosition(ghMainWnd, SDL_WINDOWPOS_CENTERED_DISPLAY(displayIndex), SDL_WINDOWPOS_CENTERED_DISPLAY(displayIndex));
+	}
+}
+
+} // namespace
+#endif
+
 bool IsFullScreen()
 {
+#if !defined(USE_SDL1) && !defined(USE_SDL3)
+	if (stereo::Settings.enabled)
+		return StereoFullscreen;
+#endif
 #ifdef USE_SDL3
 	return (SDL_GetWindowFlags(ghMainWnd) & SDL_WINDOW_FULLSCREEN) != 0;
 #elif !defined(USE_SDL1)
@@ -601,6 +673,23 @@ bool SpawnWindow(const char *lpWindowName)
 #endif
 #endif
 
+#if !defined(USE_SDL1) && !defined(USE_SDL3)
+	// --sbs forces stereo on for this run; otherwise the Graphics setting decides.
+	if (*GetOptions().Graphics.sideBySide3D)
+		stereo::Settings.enabled = true;
+#endif
+	if (stereo::Settings.enabled) {
+#if defined(USE_SDL1) || defined(USE_SDL3)
+		LogError("Side-by-side 3D is only supported in SDL2 builds");
+		stereo::Settings.enabled = false;
+#else
+		if (!*GetOptions().Graphics.upscale) {
+			LogError("Side-by-side 3D requires upscaling to be enabled");
+			stereo::Settings.enabled = false;
+		}
+#endif
+	}
+
 	Size windowSize = GetPreferredWindowSize();
 
 #ifdef USE_SDL1
@@ -616,7 +705,7 @@ bool SpawnWindow(const char *lpWindowName)
 	int flags = SDL_WINDOW_ALLOW_HIGHDPI;
 #endif
 	if (*GetOptions().Graphics.upscale) {
-		if (*GetOptions().Graphics.fullscreen) {
+		if (*GetOptions().Graphics.fullscreen && !stereo::Settings.enabled) {
 #ifdef USE_SDL3
 			flags |= SDL_WINDOW_FULLSCREEN;
 #else
@@ -630,12 +719,15 @@ bool SpawnWindow(const char *lpWindowName)
 
 #ifdef USE_SDL3
 	if (*GetOptions().Graphics.upscale) {
-		if (!SDL_CreateWindowAndRenderer(lpWindowName, windowSize.width, windowSize.height, flags, &ghMainWnd, &renderer)) ErrSdl();
+		if (!SDL_CreateWindowAndRenderer(lpWindowName, StereoWindowWidth(windowSize.width), windowSize.height, flags, &ghMainWnd, &renderer)) ErrSdl();
 	} else {
-		ghMainWnd = SDL_CreateWindow(lpWindowName, windowSize.width, windowSize.height, flags);
+		ghMainWnd = SDL_CreateWindow(lpWindowName, StereoWindowWidth(windowSize.width), windowSize.height, flags);
 	}
 #else
-	ghMainWnd = SDL_CreateWindow(lpWindowName, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, windowSize.width, windowSize.height, flags);
+	const int windowPosition = stereo::Settings.enabled ? SDL_WINDOWPOS_CENTERED_DISPLAY(GameDisplayIndex()) : SDL_WINDOWPOS_UNDEFINED;
+	ghMainWnd = SDL_CreateWindow(lpWindowName, windowPosition, windowPosition, StereoWindowWidth(windowSize.width), windowSize.height, flags);
+	if (ghMainWnd != nullptr && stereo::Settings.enabled && *GetOptions().Graphics.fullscreen)
+		SetStereoFullscreen(true);
 #endif
 
 #if defined(DEVILUTIONX_DISPLAY_PIXELFORMAT)
@@ -744,6 +836,35 @@ void ReinitializeIntegerScale()
 }
 #endif
 
+#if !defined(USE_SDL1) && !defined(USE_SDL3)
+/**
+ * Fit-to-screen measures display 0 before the window exists, which can be a different
+ * monitor from the glasses. Size each eye from the display the window is on instead;
+ * the window itself may not have reached its fullscreen size yet.
+ */
+void FitStereoEyesToWindow()
+{
+	int outputWidth = 0;
+	int outputHeight = 0;
+	const int displayIndex = SDL_GetWindowDisplayIndex(ghMainWnd);
+	SDL_DisplayMode mode;
+	if (*GetOptions().Graphics.fullscreen && displayIndex >= 0 && SDL_GetDesktopDisplayMode(displayIndex, &mode) == 0) {
+		outputWidth = mode.w;
+		outputHeight = mode.h;
+	} else {
+		SDL_GetWindowSize(ghMainWnd, &outputWidth, &outputHeight);
+	}
+	if (outputWidth <= 0 || outputHeight <= 0)
+		return;
+	Log("Side-by-side 3D: display {} is {}x{}", displayIndex, outputWidth, outputHeight);
+
+	const Size requested = forceResolution.width != 0 ? forceResolution : *GetOptions().Graphics.resolution;
+	const Size eye { (outputWidth / 2) * requested.height / outputHeight, requested.height };
+	AdjustToScreenGeometry(eye);
+	Log("Side-by-side 3D: output {}x{}, rendering {}x{} per eye", outputWidth, outputHeight, eye.width, eye.height);
+}
+#endif
+
 void ReinitializeRenderer()
 {
 	if (ghMainWnd == nullptr)
@@ -763,6 +884,11 @@ void ReinitializeRenderer()
 #ifdef USE_SDL3
 			renderer = SDL_CreateRenderer(ghMainWnd, nullptr);
 #else
+#ifdef _WIN32
+			// Direct3D 9 loses its device when XR glasses switch between 2D and 3D display modes.
+			// Always prefer Direct3D 11 so side-by-side can also be switched on from the menu.
+			SDL_SetHint(SDL_HINT_RENDER_DRIVER, "direct3d11");
+#endif
 			renderer = SDL_CreateRenderer(ghMainWnd, -1, 0);
 #endif
 			if (renderer == nullptr) {
@@ -777,7 +903,7 @@ void ReinitializeRenderer()
 #endif
 
 #ifdef USE_SDL3
-		if (!SDL_SetRenderLogicalPresentation(renderer, gnScreenWidth, gnScreenHeight,
+		if (!SDL_SetRenderLogicalPresentation(renderer, StereoWindowWidth(gnScreenWidth), gnScreenHeight,
 		        *GetOptions().Graphics.integerScaling
 		            ? SDL_LOGICAL_PRESENTATION_INTEGER_SCALE
 		            : SDL_LOGICAL_PRESENTATION_LETTERBOX)) {
@@ -788,7 +914,11 @@ void ReinitializeRenderer()
 			ErrSdl();
 		}
 
-		if (SDL_RenderSetLogicalSize(renderer, gnScreenWidth, gnScreenHeight) <= -1) {
+		if (stereo::Settings.enabled && *GetOptions().Graphics.fitToScreen) {
+			FitStereoEyesToWindow();
+		}
+
+		if (SDL_RenderSetLogicalSize(renderer, StereoWindowWidth(gnScreenWidth), gnScreenHeight) <= -1) {
 			ErrSdl();
 		}
 #endif
@@ -823,6 +953,13 @@ void SetFullscreenMode()
 		ErrSdl();
 	}
 #else
+#ifndef USE_SDL3
+	if (stereo::Settings.enabled) {
+		SetStereoFullscreen(*GetOptions().Graphics.fullscreen);
+		RedrawEverything();
+		return;
+	}
+#endif
 	// When switching from windowed to "true fullscreen",
 	// update the display mode of the window before changing the
 	// fullscreen mode so that the display mode only has to change once
@@ -850,7 +987,7 @@ void SetFullscreenMode()
 	if (!*GetOptions().Graphics.fullscreen) {
 		SDL_RestoreWindow(ghMainWnd); // Avoid window being maximized before resizing
 		const Size windowSize = GetPreferredWindowSize();
-		SDL_SetWindowSize(ghMainWnd, windowSize.width, windowSize.height);
+		SDL_SetWindowSize(ghMainWnd, StereoWindowWidth(windowSize.width), windowSize.height);
 	}
 	if (!*GetOptions().Graphics.upscale) {
 		// Because "true fullscreen" is locked into specific resolutions based on the modes
@@ -901,8 +1038,13 @@ void ResizeWindow()
 			SDL_RestoreWindow(ghMainWnd); // Avoid window being maximized before resizing
 	}
 
-	if (!trueFullscreen)
-		SDL_SetWindowSize(ghMainWnd, windowSize.width, windowSize.height);
+#ifndef USE_SDL3
+	if (stereo::Settings.enabled)
+		SetStereoFullscreen(*GetOptions().Graphics.fullscreen);
+	else
+#endif
+	    if (!trueFullscreen)
+		SDL_SetWindowSize(ghMainWnd, StereoWindowWidth(windowSize.width), windowSize.height);
 #endif
 
 	ReinitializeRenderer();
@@ -919,6 +1061,35 @@ void ResizeWindow()
 	CreateBackBuffer();
 	RedrawEverything();
 }
+
+#if !defined(USE_SDL1) && !defined(USE_SDL3)
+namespace {
+
+void OptionSideBySide3DChanged()
+{
+	const bool enable = *GetOptions().Graphics.sideBySide3D;
+	if (ghMainWnd == nullptr || enable == stereo::Settings.enabled)
+		return;
+	if (enable && renderer == nullptr) {
+		LogError("Side-by-side 3D requires upscaling to be enabled");
+		return;
+	}
+
+	stereo::Settings.enabled = enable;
+	if (!enable) {
+		// Undo the borderless side-by-side window before the normal resize logic runs.
+		StereoFullscreen = false;
+		SDL_SetWindowBordered(ghMainWnd, SDL_TRUE);
+		if (*GetOptions().Graphics.fullscreen)
+			SDL_SetWindowFullscreen(ghMainWnd, SDL_WINDOW_FULLSCREEN_DESKTOP);
+	}
+	ResizeWindowAndUpdateResolutionOptions();
+}
+
+const auto OptionChangeHandlerSideBySide3D = (GetOptions().Graphics.sideBySide3D.SetValueChangedCallback(OptionSideBySide3DChanged), true);
+
+} // namespace
+#endif
 
 SDL_Surface *GetOutputSurface()
 {

@@ -772,6 +772,9 @@ GraphicsOptions::GraphicsOptions()
           })
     , integerScaling("Integer Scaling", OptionEntryFlags::CantChangeInGame | OptionEntryFlags::RecreateUI, N_("Integer Scaling"), N_("Scales the image using whole number pixel ratio."), false)
 #endif
+#if !defined(USE_SDL1) && !defined(USE_SDL3)
+    , sideBySide3D("Side-by-Side 3D", OptionEntryFlags::CantChangeInGame | OptionEntryFlags::RecreateUI, "Side-by-Side 3D", "Full side-by-side stereoscopic 3D for XR glasses. Opens on the first display in a side-by-side mode such as 3840x1080.", false)
+#endif
     , frameRateControl("Frame Rate Control",
           OptionEntryFlags::RecreateUI
 #if defined(NXDK) || defined(__ANDROID__)
@@ -821,6 +824,9 @@ std::vector<OptionEntryBase *> GraphicsOptions::GetEntries()
 		&upscale,
 		&scaleQuality,
 		&integerScaling,
+#endif
+#if !defined(USE_SDL1) && !defined(USE_SDL3)
+		&sideBySide3D,
 #endif
 		&frameRateControl,
 		&brightness,

@@ -31,6 +31,7 @@
 #include "engine/assets.hpp"
 #include "engine/dx.h"
 #include "engine/palette.h"
+#include "engine/render/stereo.hpp"
 #include "engine/sound.h"
 #include "options.h"
 #include "utils/display.h"
@@ -419,7 +420,7 @@ bool SVidPlayBegin(const char *filename, int flags)
 		    !SDL_SetRenderLogicalPresentation(renderer, renderWidth, renderHeight,
 		        *GetOptions().Graphics.integerScaling ? SDL_LOGICAL_PRESENTATION_INTEGER_SCALE : SDL_LOGICAL_PRESENTATION_LETTERBOX)
 #else
-		    SDL_RenderSetLogicalSize(renderer, renderWidth, renderHeight) <= -1
+		    SDL_RenderSetLogicalSize(renderer, stereo::Settings.enabled ? 2 * renderWidth : renderWidth, renderHeight) <= -1
 #endif
 		) {
 			ErrSdl();
@@ -554,7 +555,7 @@ void SVidPlayEnd()
 		    !SDL_SetRenderLogicalPresentation(renderer, gnScreenWidth, gnScreenHeight,
 		        *GetOptions().Graphics.integerScaling ? SDL_LOGICAL_PRESENTATION_INTEGER_SCALE : SDL_LOGICAL_PRESENTATION_LETTERBOX)
 #else
-		    SDL_RenderSetLogicalSize(renderer, gnScreenWidth, gnScreenHeight) <= -1
+		    SDL_RenderSetLogicalSize(renderer, stereo::Settings.enabled ? 2 * gnScreenWidth : gnScreenWidth, gnScreenHeight) <= -1
 #endif
 		) {
 			ErrSdl();

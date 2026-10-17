@@ -50,6 +50,7 @@
 #include "engine/load_file.hpp"
 #include "engine/random.hpp"
 #include "engine/render/clx_render.hpp"
+#include "engine/render/stereo.hpp"
 #include "engine/sound.h"
 #include "game_mode.hpp"
 #include "gamemenu.h"
@@ -502,12 +503,58 @@ void ClosePanels()
 	QuestLogIsOpen = false;
 }
 
+/** Ctrl+Alt+Up/Down: depth strength, Ctrl+Alt+Left/Right: screen plane, Ctrl+Alt+PageUp/PageDown: right eye height, Ctrl+Alt+Home: swap eyes. */
+bool HandleStereoKey(SDL_Keycode vkey)
+{
+	switch (vkey) {
+	case SDLK_BACKSPACE:
+		stereo::Settings.smoothTiles = !stereo::Settings.smoothTiles;
+		EventPlrMsg(stereo::Settings.smoothTiles ? "3D wall/roof smoothing: on" : "3D wall/roof smoothing: off");
+		return true;
+	case SDLK_INSERT:
+		stereo::Settings.legacyDepth = !stereo::Settings.legacyDepth;
+		EventPlrMsg(stereo::Settings.legacyDepth ? "3D depth model: old (per tile)" : "3D depth model: new (back edges)");
+		return true;
+	case SDLK_PAGEUP:
+	case SDLK_PAGEDOWN:
+		stereo::Settings.verticalOffset = std::clamp(stereo::Settings.verticalOffset + (vkey == SDLK_PAGEDOWN ? 1 : -1), -20, 20);
+		EventPlrMsg(StrCat("3D right eye height: ", stereo::Settings.verticalOffset, " px"));
+		return true;
+	case SDLK_UP:
+	case SDLK_DOWN: {
+		const float strength = stereo::AdjustStrength(vkey == SDLK_UP ? 0.002F : -0.002F);
+		const int tenths = static_cast<int>(strength * 1000.0F + 0.5F);
+		EventPlrMsg(StrCat("3D depth: ", tenths / 10, ".", tenths % 10, "%"));
+		return true;
+	}
+	case SDLK_LEFT:
+	case SDLK_RIGHT: {
+		const float convergence = stereo::AdjustConvergence(vkey == SDLK_RIGHT ? 0.05F : -0.05F);
+		EventPlrMsg(StrCat("3D screen plane: ", static_cast<int>(convergence * 100.0F + (convergence < 0 ? -0.5F : 0.5F)), "%"));
+		return true;
+	}
+	case SDLK_END:
+		stereo::DumpNextFrame = true;
+		EventPlrMsg("3D frame saved to sbs_frame.bmp");
+		return true;
+	case SDLK_HOME:
+		stereo::Settings.swapEyes = !stereo::Settings.swapEyes;
+		EventPlrMsg(stereo::Settings.swapEyes ? "3D eyes swapped" : "3D eyes normal");
+		return true;
+	default:
+		return false;
+	}
+}
+
 void PressKey(SDL_Keycode vkey, uint16_t modState)
 {
 	Options &options = GetOptions();
 	remap_keyboard_key(&vkey);
 
 	if (vkey == SDLK_UNKNOWN)
+		return;
+
+	if (stereo::Settings.enabled && (modState & SDL_KMOD_CTRL) != 0 && (modState & SDL_KMOD_ALT) != 0 && HandleStereoKey(vkey))
 		return;
 
 	if (gmenu_presskeys(vkey) || CheckKeypress(vkey)) {
@@ -1024,6 +1071,11 @@ extern "C" void SdlLogToFile(void *userdata, int /*category*/, SDL_LogPriority p
 	PrintHelpOption("-n", _(/* TRANSLATORS: Commandline Option */ "Skip startup videos"));
 	PrintHelpOption("-f", _(/* TRANSLATORS: Commandline Option */ "Display frames per second"));
 	PrintHelpOption("--verbose", _(/* TRANSLATORS: Commandline Option */ "Enable verbose logging"));
+	PrintHelpOption("--sbs", "Full side-by-side stereoscopic 3D output (requires upscaling)");
+	PrintHelpOption("--sbs-strength <#>", "3D depth in tenths of a percent of eye width (default 20)");
+	PrintHelpOption("--sbs-convergence <#>", "Screen-plane height in percent of the view (default 80)");
+	PrintHelpOption("--sbs-swap", "Swap left and right eyes");
+	PrintHelpOption("--sbs-display <#>", "Display index for 3D output (default: first 3840x1080-style display)");
 #if SDL_VERSION_ATLEAST(2, 0, 0)
 	PrintHelpOption("--log-to-file <path>", _(/* TRANSLATORS: Commandline Option */ "Log to a file instead of stderr"));
 #endif
@@ -1111,6 +1163,26 @@ void DiabloParseFlags(int argc, char **argv)
 				diablo_quit(64);
 			}
 			forceLocale = argv[++i];
+		} else if (arg == "--sbs") {
+			stereo::Settings.enabled = true;
+		} else if (arg == "--sbs-swap") {
+			stereo::Settings.swapEyes = true;
+		} else if (arg == "--sbs-strength" || arg == "--sbs-convergence" || arg == "--sbs-display") {
+			if (i + 1 == argc) {
+				PrintFlagRequiresArgument(arg);
+				diablo_quit(64);
+			}
+			const ParseIntResult<int> parsedParam = ParseInt<int>(argv[++i]);
+			if (!parsedParam.has_value()) {
+				PrintFlagMessage(arg, " must be a number");
+				diablo_quit(64);
+			}
+			if (arg == "--sbs-strength")
+				stereo::Settings.strength = parsedParam.value() / 1000.0F;
+			else if (arg == "--sbs-convergence")
+				stereo::Settings.convergence = parsedParam.value() / 100.0F;
+			else
+				stereo::Settings.display = parsedParam.value();
 #ifndef DISABLE_DEMOMODE
 		} else if (arg == "--demo") {
 			if (i + 1 == argc) {

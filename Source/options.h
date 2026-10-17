@@ -552,6 +552,10 @@ struct GraphicsOptions : OptionCategoryBase {
 	/** @brief Only scale by values divisible by the width and height. */
 	OptionEntryBoolean integerScaling;
 #endif
+#if !defined(USE_SDL1) && !defined(USE_SDL3)
+	/** @brief Full side-by-side stereoscopic 3D output for XR glasses. */
+	OptionEntryBoolean sideBySide3D;
+#endif
 	/** @brief Limit frame rate either for vsync or CPU load. */
 	OptionEntryEnum<FrameRateControl> frameRateControl;
 	/** @brief Brightness level. */

@@ -19,6 +19,7 @@
 #include "engine/point.hpp"
 #include "engine/render/blit_impl.hpp"
 #include "engine/render/overlapped_memset.hpp"
+#include "engine/render/stereo.hpp"
 #include "levels/dun_tile.hpp"
 #include "options.h"
 #include "utils/attributes.h"
@@ -122,12 +123,14 @@ DVL_ALWAYS_INLINE DVL_ATTRIBUTE_HOT void RenderLineOpaque(uint8_t *DVL_RESTRICT 
 template <>
 DVL_ALWAYS_INLINE DVL_ATTRIBUTE_HOT void RenderLineOpaque<LightType::FullyDark>(uint8_t *DVL_RESTRICT dst, [[maybe_unused]] const uint8_t *DVL_RESTRICT src, uint_fast8_t n, [[maybe_unused]] const uint8_t *DVL_RESTRICT tbl, [[maybe_unused]] const Lightmap *lightmap)
 {
+	stereo::MarkDepth(dst, n);
 	FillBytesUpTo32(dst, n, 0);
 }
 
 template <>
 DVL_ALWAYS_INLINE DVL_ATTRIBUTE_HOT void RenderLineOpaque<LightType::FullyLit>(uint8_t *DVL_RESTRICT dst, const uint8_t *DVL_RESTRICT src, uint_fast8_t n, [[maybe_unused]] const uint8_t *DVL_RESTRICT tbl, [[maybe_unused]] const Lightmap *lightmap)
 {
+	stereo::MarkDepth(dst, n);
 #ifndef DEBUG_RENDER_COLOR
 	CopyBytesUpTo32(dst, src, n);
 #else
@@ -138,6 +141,7 @@ DVL_ALWAYS_INLINE DVL_ATTRIBUTE_HOT void RenderLineOpaque<LightType::FullyLit>(u
 template <>
 DVL_ALWAYS_INLINE DVL_ATTRIBUTE_HOT void RenderLineOpaque<LightType::PartiallyLit>(uint8_t *DVL_RESTRICT dst, const uint8_t *DVL_RESTRICT src, uint_fast8_t n, const uint8_t *DVL_RESTRICT tbl, [[maybe_unused]] const Lightmap *lightmap)
 {
+	stereo::MarkDepth(dst, n);
 #ifndef DEBUG_RENDER_COLOR
 	BlitPixelsWithMap(dst, src, n, tbl);
 #else
@@ -148,6 +152,7 @@ DVL_ALWAYS_INLINE DVL_ATTRIBUTE_HOT void RenderLineOpaque<LightType::PartiallyLi
 template <>
 DVL_ALWAYS_INLINE DVL_ATTRIBUTE_HOT void RenderLineOpaque<LightType::PerPixel>(uint8_t *DVL_RESTRICT dst, const uint8_t *DVL_RESTRICT src, uint_fast8_t n, const uint8_t *DVL_RESTRICT tbl, const Lightmap *lightmap)
 {
+	stereo::MarkDepth(dst, n);
 #ifndef DEBUG_RENDER_COLOR
 	BlitPixelsWithLightmap(dst, src, n, *lightmap);
 #else
@@ -208,8 +213,10 @@ template <LightType Light, bool Transparent, uint_fast8_t N>
 DVL_ALWAYS_INLINE DVL_ATTRIBUTE_HOT void RenderLineTransparentOrOpaqueN(uint8_t *DVL_RESTRICT dst, const uint8_t *DVL_RESTRICT src, const uint8_t *DVL_RESTRICT tbl, const Lightmap *lightmap)
 {
 	if constexpr (!Transparent && Light == LightType::FullyDark) {
+		stereo::MarkDepth(dst, N);
 		BlitFillDirect(dst, N, 0);
 	} else if constexpr (!Transparent && Light == LightType::FullyLit) {
+		stereo::MarkDepth(dst, N);
 		BlitPixelsDirect(dst, src, N);
 	} else {
 		RenderLineTransparentOrOpaque<Light, Transparent>(dst, src, N, tbl, lightmap);

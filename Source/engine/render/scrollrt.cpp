@@ -34,6 +34,7 @@
 #include "engine/render/clx_render.hpp"
 #include "engine/render/dun_render.hpp"
 #include "engine/render/light_render.hpp"
+#include "engine/render/stereo.hpp"
 #include "engine/render/text_render.hpp"
 #include "engine/trn.hpp"
 #include "engine/world_tile.hpp"
@@ -473,6 +474,7 @@ void DrawPlayer(const Surface &out, const Player &player, Point tilePosition, Po
 
 	const ClxSprite sprite = player.currentSprite();
 	const Point spriteBufferPosition = targetBufferPosition + player.getRenderingOffset(sprite);
+	const stereo::FootScope footScope(spriteBufferPosition.y - TILE_HEIGHT / 2);
 
 	if (&player == PlayerUnderCursor)
 		ClxDrawOutlineSkipColorZero(out, GetPlayerOutlineColor(player.getId()), spriteBufferPosition, sprite);
@@ -538,6 +540,31 @@ void DrawObject(const Surface &out, const Object &objectToDraw, Point tilePositi
 }
 
 static void DrawDungeon(const Surface & /*out*/, const Lightmap & /*lightmap*/, Point /*tilePosition*/, Point /*targetBufferPosition*/);
+
+/**
+ * Stereo ground line for one half of a structure tile. Buildings are drawn as stacks from every tile they cover,
+ * so walls and roofs higher up come from tiles further back. Walking forward through solid tiles in the same
+ * screen columns finds the building's front, whose ground line every pixel of that half then shares.
+ * @return The top corner (peak) of the frontmost structure tile.
+ */
+Point StereoStructurePeak(Point tilePosition, Point targetBufferPosition, bool rightHalf)
+{
+	Point peak { targetBufferPosition.x + TILE_WIDTH / 2, targetBufferPosition.y - TILE_HEIGHT };
+	if (IsFloor(tilePosition))
+		return peak;
+	// Tiles in front alternate between the down-right and down-left neighbours while covering the same columns.
+	bool stepRight = rightHalf;
+	Point tile = tilePosition;
+	for (int i = 0; i < 16; ++i) {
+		const Point next = tile + (stepRight ? Displacement { 1, 0 } : Displacement { 0, 1 });
+		if (!InDungeonBounds(next) || IsFloor(next))
+			break;
+		peak += stepRight ? Displacement { TILE_WIDTH / 2, TILE_HEIGHT / 2 } : Displacement { -TILE_WIDTH / 2, TILE_HEIGHT / 2 };
+		tile = next;
+		stepRight = !stepRight;
+	}
+	return peak;
+}
 
 /**
  * @brief Render a cell
@@ -610,9 +637,17 @@ void DrawCell(const Surface &out, const Lightmap lightmap, Point tilePosition, P
 	uint8_t lightmapBuffer[TILE_WIDTH * TILE_HEIGHT];
 	const Lightmap bleedLightmap = Lightmap::bleedUp(*GetOptions().Graphics.perPixelLighting, lightmap, targetBufferPosition, lightmapBuffer);
 
+	// Walls stand on the back edges of the building's front tile; floor pixels in front of them lie below that line and stay flat.
+	const stereo::FootScope footScope(stereo::Writer.foot);
+	const Point leftPeak = StereoStructurePeak(tilePosition, targetBufferPosition, /*rightHalf=*/false);
+	const Point rightPeak = StereoStructurePeak(tilePosition, targetBufferPosition, /*rightHalf=*/true);
+	const stereo::FootLine leftFoot = stereo::FootScope::BackEdges(leftPeak.y, leftPeak.x);
+	const stereo::FootLine rightFoot = stereo::FootScope::BackEdges(rightPeak.y, rightPeak.x);
+
 	// If the first micro tile is a floor tile, it may be followed
 	// by foliage which should be rendered now.
 	const bool isFloor = IsFloor(tilePosition);
+	stereo::Writer.foot = leftFoot;
 	if (const LevelCelBlock levelCelBlock { pMap->mt[0] }; levelCelBlock.hasValue()) {
 		const TileType tileType = levelCelBlock.type();
 		if (!isFloor || tileType == TileType::TransparentSquare) {
@@ -625,6 +660,7 @@ void DrawCell(const Surface &out, const Lightmap lightmap, Point tilePosition, P
 			}
 		}
 	}
+	stereo::Writer.foot = rightFoot;
 	if (const LevelCelBlock levelCelBlock { pMap->mt[1] }; levelCelBlock.hasValue()) {
 		const TileType tileType = levelCelBlock.type();
 		if (!isFloor || tileType == TileType::TransparentSquare) {
@@ -641,6 +677,7 @@ void DrawCell(const Surface &out, const Lightmap lightmap, Point tilePosition, P
 
 	for (uint_fast8_t i = 2, n = MicroTileLen; i < n; i += 2) {
 		{
+			stereo::Writer.foot = leftFoot;
 			const LevelCelBlock levelCelBlock { pMap->mt[i] };
 			if (levelCelBlock.hasValue()) {
 				RenderTile(out, bleedLightmap, targetBufferPosition,
@@ -649,6 +686,7 @@ void DrawCell(const Surface &out, const Lightmap lightmap, Point tilePosition, P
 			}
 		}
 		{
+			stereo::Writer.foot = rightFoot;
 			const LevelCelBlock levelCelBlock { pMap->mt[i + 1] };
 			if (levelCelBlock.hasValue()) {
 				RenderTile(out, bleedLightmap, targetBufferPosition + RightFrameDisplacement,
@@ -713,6 +751,7 @@ void DrawFloorTile(const Surface &out, const Lightmap &lightmap, Point tilePosit
  */
 void DrawItem(const Surface &out, int8_t itemIndex, Point targetBufferPosition, int lightTableIndex)
 {
+	const stereo::FootScope footScope(stereo::FootScope::Flat()); // Items lie on the ground.
 	const Item &item = Items[itemIndex];
 	const ClxSprite sprite = item.AnimInfo.currentSprite();
 	const Point position = targetBufferPosition + item.getRenderingOffset(sprite);
@@ -740,6 +779,7 @@ void DrawMonsterHelper(const Surface &out, Point tilePosition, Point targetBuffe
 		auto &towner = Towners[mi];
 		const Point position = targetBufferPosition + towner.getRenderingOffset();
 		const ClxSprite sprite = towner.currentSprite();
+		const stereo::FootScope footScope(position.y - TILE_HEIGHT / 2);
 		if (mi == pcursmonst) {
 			ClxDrawOutlineSkipColorZero(out, OutlineColorsTowner, position, sprite);
 		}
@@ -765,6 +805,7 @@ void DrawMonsterHelper(const Surface &out, Point tilePosition, Point targetBuffe
 	const Displacement offset = monster.getRenderingOffset(sprite);
 
 	const Point monsterRenderPosition = targetBufferPosition + offset;
+	const stereo::FootScope footScope(monsterRenderPosition.y - TILE_HEIGHT / 2);
 	if (mi == pcursmonst) {
 		ClxDrawOutlineSkipColorZero(out, OutlineColorsMonster, monsterRenderPosition, sprite);
 	}
@@ -782,6 +823,7 @@ void DrawDungeon(const Surface &out, const Lightmap &lightmap, Point tilePositio
 {
 	assert(InDungeonBounds(tilePosition));
 	const int lightTableIndex = dLight[tilePosition.x][tilePosition.y];
+	const stereo::FootScope footScope(targetBufferPosition.y - TILE_HEIGHT / 2);
 
 	DrawCell(out, lightmap, tilePosition, targetBufferPosition, lightTableIndex);
 
@@ -799,6 +841,7 @@ void DrawDungeon(const Surface &out, const Lightmap &lightmap, Point tilePositio
 	}
 
 	if (lightTableIndex < LightsMax && bDead != 0) {
+		const stereo::FootScope corpseFootScope(stereo::FootScope::Flat());
 		const Corpse &corpse = Corpses[(bDead & 0x1F) - 1];
 		const Point position { targetBufferPosition.x - CalculateSpriteTileCenterX(corpse.width), targetBufferPosition.y };
 		const ClxSprite sprite = corpse.spritesForDirection(static_cast<Direction>((bDead >> 5) & 7))[corpse.frame];
@@ -822,6 +865,7 @@ void DrawDungeon(const Surface &out, const Lightmap &lightmap, Point tilePositio
 	}
 
 	if (TileContainsDeadPlayer(tilePosition)) {
+		const stereo::FootScope deadPlayerFootScope(stereo::FootScope::Flat());
 		DrawDeadPlayer(out, tilePosition, targetBufferPosition, lightTableIndex);
 	}
 	Player *player = PlayerAtPosition(tilePosition);
@@ -911,6 +955,7 @@ void DrawDungeon(const Surface &out, const Lightmap &lightmap, Point tilePositio
 		const bool perPixelLighting = *GetOptions().Graphics.perPixelLighting;
 		const int8_t bArch = dSpecial[tilePosition.x][tilePosition.y] - 1;
 		if (bArch >= 0) {
+			const stereo::FootScope archFootScope(targetBufferPosition.y - TILE_HEIGHT, targetBufferPosition.x + TILE_WIDTH / 2);
 			bool transparency = TransList[bMap];
 #ifdef _DEBUG
 			// Turn transparency off here for debugging
@@ -937,8 +982,10 @@ void DrawDungeon(const Surface &out, const Lightmap &lightmap, Point tilePositio
 		// This could probably have been better solved by sprites in screen space.
 		if (tilePosition.x > 0 && tilePosition.y > 0 && targetBufferPosition.y > TILE_HEIGHT) {
 			const int8_t bArch = dSpecial[tilePosition.x - 1][tilePosition.y - 1] - 1;
-			if (bArch >= 0)
+			if (bArch >= 0) {
+				const stereo::FootScope leavesFootScope(targetBufferPosition.y - TILE_HEIGHT - TILE_HEIGHT / 2);
 				ClxDraw(out, targetBufferPosition + Displacement { 0, -TILE_HEIGHT }, (*pSpecialCels)[bArch]);
+			}
 		}
 	}
 }
@@ -1090,6 +1137,7 @@ void DrawOOB(const Surface &out, const Lightmap &lightmap, Point tilePosition, P
 	for (int i = 0; i < rows + 5; i++) { // 5 extra rows needed to make sure everything gets rendered at the bottom half of the screen
 		for (int j = 0; j < columns; j++, tilePosition += Direction::East, targetBufferPosition.x += TILE_WIDTH) {
 			if (!InDungeonBounds(tilePosition)) {
+				const stereo::FootScope footScope(targetBufferPosition.y - TILE_HEIGHT / 2);
 				if (leveltype == DTYPE_TOWN) {
 					world_draw_black_tile(out, targetBufferPosition.x, targetBufferPosition.y);
 				} else {
@@ -1118,10 +1166,10 @@ void DrawOOB(const Surface &out, const Lightmap &lightmap, Point tilePosition, P
 /**
  * @brief Scale up the top left part of the buffer 2x.
  */
-void Zoom(const Surface &out)
+void GetZoomViewport(const Surface &out, int &viewportOffsetX, int &viewportWidth)
 {
-	int viewportWidth = out.w();
-	int viewportOffsetX = 0;
+	viewportWidth = out.w();
+	viewportOffsetX = 0;
 	if (CanPanelsCoverView()) {
 		if (IsLeftPanelOpen()) {
 			viewportWidth -= SidePanelSize.width;
@@ -1130,6 +1178,13 @@ void Zoom(const Surface &out)
 			viewportWidth -= SidePanelSize.width;
 		}
 	}
+}
+
+void Zoom(const Surface &out)
+{
+	int viewportWidth;
+	int viewportOffsetX;
+	GetZoomViewport(out, viewportOffsetX, viewportWidth);
 
 	// We round to even for the source width and height.
 	// If the width / height was odd, we copy just one extra pixel / row later on.
@@ -1278,12 +1333,24 @@ void DrawGame(const Surface &fullOut, Point position, Displacement offset)
 	    out.at(0, 0), out.pitch(), LightTables, FullyLitLightTable, FullyDarkLightTable,
 	    dLight, MicroTileLen);
 
+	if (stereo::Settings.enabled) {
+		stereo::BeginWorld(fullOut.at(0, 0), fullOut.pitch(), fullOut.w(), gnViewportHeight);
+	}
+
 	DrawFloor(out, lightmap, position, Point {} + offset, rows, columns);
 	DrawTileContent(out, lightmap, position, Point {} + offset, rows, columns);
 	DrawOOB(out, lightmap, position, Point {} + offset, rows, columns);
 
+	int zoomOffsetX = 0;
+	int zoomWidth = 0;
 	if (*GetOptions().Graphics.zoom) {
-		Zoom(fullOut.subregionY(0, gnViewportHeight));
+		const Surface zoomOut = fullOut.subregionY(0, gnViewportHeight);
+		GetZoomViewport(zoomOut, zoomOffsetX, zoomWidth);
+		Zoom(zoomOut);
+	}
+
+	if (stereo::Settings.enabled) {
+		stereo::EndWorld(zoomOffsetX, zoomWidth);
 	}
 
 #ifdef DUN_RENDER_STATS
@@ -1828,6 +1895,8 @@ void scrollrt_draw_game_screen()
 	DrawCursor(out);
 	DrawMain(hgt, false, false, false, false, false);
 
+	StereoFrameHasWorld = true;
+
 	RenderPresent();
 }
 
@@ -1922,6 +1991,7 @@ void DrawAndBlit()
 		}
 	}
 
+	StereoFrameHasWorld = true;
 	RenderPresent();
 }
 

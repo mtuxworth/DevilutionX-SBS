@@ -24,6 +24,7 @@
 #include "controls/control_mode.hpp"
 #include "controls/plrctrls.h"
 #include "engine/render/primitive_render.hpp"
+#include "engine/render/stereo.hpp"
 #include "headless_mode.hpp"
 #include "init.hpp"
 #include "options.h"
@@ -31,6 +32,8 @@
 #include "utils/log.hpp"
 #include "utils/sdl_wrap.h"
 #include "utils/static_vector.hpp"
+#include "utils/str_cat.hpp"
+#include "utils/ui_fwd.h"
 
 #ifndef USE_SDL1
 #include "controls/touch/renderers.h"
@@ -70,7 +73,95 @@ const void *LastPresentedPixels;
 /** Whether we render directly to the screen surface, i.e. `PalSurface == GetOutputSurface()` */
 bool RenderDirectlyToOutputSurface;
 
+bool StereoFrameHasWorld;
+
 namespace {
+
+#if !defined(USE_SDL1) && !defined(USE_SDL3)
+/** Both eyes in full colour; 32-bit so sub-pixel shifts can be blended. */
+SDLSurfaceUniquePtr StereoTextureSurface;
+SDLTextureUniquePtr StereoTexture;
+
+void EnsureStereoResources(int width, int height)
+{
+	if (StereoTextureSurface != nullptr && StereoTextureSurface->w == 2 * width && StereoTextureSurface->h == height)
+		return;
+
+	StereoTexture = SDLWrap::CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 2 * width, height);
+	StereoTextureSurface = SDLWrap::CreateRGBSurfaceWithFormat(0, 2 * width, height, 32, SDL_PIXELFORMAT_ARGB8888);
+}
+
+/** Textures can be lost when the display mode changes (e.g. glasses toggling 2D/3D); recreate them and skip the frame. */
+void RecoverLostTextures()
+{
+	LogError("Side-by-side 3D: texture update failed ({}), recreating textures", SDL_GetError());
+	SDL_ClearError();
+	StereoTexture = nullptr;
+	StereoTextureSurface = nullptr;
+	ReinitializeTexture();
+}
+
+void RenderStereo(SDL_Surface *monoSurface)
+{
+	const int width = gnScreenWidth;
+	const int height = gnScreenHeight;
+
+	if (!StereoFrameHasWorld) {
+		// Menus, loading screens and videos: show the flat frame to both eyes.
+		stereo::InvalidateWorld();
+		if (SDL_UpdateTexture(texture.get(), nullptr, monoSurface->pixels, monoSurface->pitch) <= -1) {
+			RecoverLostTextures();
+			return;
+		}
+		// Videos swap in a texture of their own size, so size each eye from the texture.
+		int eyeWidth = width;
+		int eyeHeight = height;
+		SDL_QueryTexture(texture.get(), nullptr, nullptr, &eyeWidth, &eyeHeight);
+		const SDL_Rect leftEye { 0, 0, eyeWidth, eyeHeight };
+		const SDL_Rect rightEye { eyeWidth, stereo::Settings.verticalOffset * eyeHeight / height, eyeWidth, eyeHeight };
+		if (SDL_RenderCopy(renderer, texture.get(), nullptr, &leftEye) <= -1 || SDL_RenderCopy(renderer, texture.get(), nullptr, &rightEye) <= -1)
+			RecoverLostTextures();
+		return;
+	}
+	StereoFrameHasWorld = false;
+
+	EnsureStereoResources(width, height);
+	uint8_t paletteRgb[256 * 3];
+	for (int i = 0; i < 256; ++i) {
+		const SDL_Color &color = Palette->colors[i];
+		paletteRgb[3 * i] = color.r;
+		paletteRgb[3 * i + 1] = color.g;
+		paletteRgb[3 * i + 2] = color.b;
+	}
+	const SDL_PixelFormat *format = StereoTextureSurface->format;
+	const stereo::RgbFrame rgbFrame {
+		static_cast<uint32_t *>(StereoTextureSurface->pixels),
+		StereoTextureSurface->pitch / 4,
+		format->Rshift,
+		format->Gshift,
+		format->Bshift,
+		0xFF000000U,
+		paletteRgb,
+	};
+	stereo::Compose(static_cast<const uint8_t *>(PalSurface->pixels), PalSurface->pitch, width, height, rgbFrame);
+	if (SDL_UpdateTexture(StereoTexture.get(), nullptr, StereoTextureSurface->pixels, StereoTextureSurface->pitch) <= -1
+	    || SDL_RenderCopy(renderer, StereoTexture.get(), nullptr, nullptr) <= -1) {
+		RecoverLostTextures();
+		return;
+	}
+	if (stereo::DumpNextFrame) {
+		stereo::DumpNextFrame = false;
+		char *basePath = SDL_GetBasePath();
+		const std::string path = StrCat(basePath != nullptr ? basePath : "", "sbs_frame.bmp");
+		if (SDL_SaveBMP(StereoTextureSurface.get(), path.c_str()) == 0)
+			Log("Side-by-side 3D: saved {}x{} frame to {}", StereoTextureSurface->w, StereoTextureSurface->h, path);
+		const std::string depthPath = StrCat(basePath != nullptr ? basePath : "", "sbs_depth.bmp");
+		if (stereo::SaveDepthImage(depthPath.c_str()))
+			Log("Side-by-side 3D: saved depth map to {}", depthPath);
+		SDL_free(basePath);
+	}
+}
+#endif
 
 bool CanRenderDirectlyToOutputSurface()
 {
@@ -140,6 +231,10 @@ void dx_cleanup()
 	PinnedPalSurface = nullptr;
 	Palette = nullptr;
 	RendererTextureSurface = nullptr;
+#if !defined(USE_SDL1) && !defined(USE_SDL3)
+	StereoTexture = nullptr;
+	StereoTextureSurface = nullptr;
+#endif
 #ifndef USE_SDL1
 	texture = nullptr;
 	FreeVirtualGamepadTextures();
@@ -311,8 +406,12 @@ void RenderPresent()
 #else
 		if (SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255) <= -1) ErrSdl();
 		if (SDL_RenderClear(renderer) <= -1) ErrSdl();
-		if (SDL_UpdateTexture(texture.get(), nullptr, surface->pixels, surface->pitch) <= -1) ErrSdl();
-		if (SDL_RenderCopy(renderer, texture.get(), nullptr, nullptr) <= -1) ErrSdl();
+		if (stereo::Settings.enabled) {
+			RenderStereo(surface);
+		} else {
+			if (SDL_UpdateTexture(texture.get(), nullptr, surface->pixels, surface->pitch) <= -1) ErrSdl();
+			if (SDL_RenderCopy(renderer, texture.get(), nullptr, nullptr) <= -1) ErrSdl();
+		}
 #endif
 
 		if (ControlMode == ControlTypes::VirtualGamepad) {

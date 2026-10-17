@@ -531,6 +531,7 @@ endif()
 
 add_devilutionx_object_library(libdevilutionx_light_render
   engine/render/light_render.cpp
+  engine/render/stereo.cpp
 )
 
 add_devilutionx_object_library(libdevilutionx_light_tables

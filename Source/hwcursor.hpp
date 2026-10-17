@@ -14,6 +14,7 @@
 #include <SDL_version.h>
 #endif
 
+#include "engine/render/stereo.hpp"
 #include "options.h"
 #include "utils/log.hpp"
 #include "utils/sdl_compat.h"
@@ -27,7 +28,8 @@ namespace devilution {
 inline bool IsHardwareCursorEnabled()
 {
 #if SDL_VERSION_ATLEAST(2, 0, 0)
-	return *GetOptions().Graphics.hardwareCursor && HardwareCursorSupported();
+	// The OS cursor would only appear in one eye of a side-by-side image.
+	return *GetOptions().Graphics.hardwareCursor && HardwareCursorSupported() && !stereo::Settings.enabled;
 #else
 	return false;
 #endif

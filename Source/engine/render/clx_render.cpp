@@ -11,6 +11,7 @@
 
 #include "engine/point.hpp"
 #include "engine/render/blit_impl.hpp"
+#include "engine/render/stereo.hpp"
 #include "engine/surface.hpp"
 #include "utils/attributes.h"
 #include "utils/clx_decode.hpp"
@@ -234,6 +235,23 @@ void DoRenderBackwards(
 	}
 }
 
+// Records stereo depth for opaque sprite pixels; blended pixels keep the depth of what is behind them.
+template <typename BlitFn>
+struct DepthMarking {
+	BlitFn blitFn;
+
+	DVL_ALWAYS_INLINE DVL_ATTRIBUTE_HOT void operator()(unsigned length, uint8_t *DVL_RESTRICT dst, const uint8_t *DVL_RESTRICT src) const
+	{
+		stereo::MarkDepth(dst, length);
+		blitFn(length, dst, src);
+	}
+	DVL_ALWAYS_INLINE DVL_ATTRIBUTE_HOT void operator()(unsigned length, uint8_t color, uint8_t *DVL_RESTRICT dst) const
+	{
+		stereo::MarkDepth(dst, length);
+		blitFn(length, color, dst);
+	}
+};
+
 constexpr size_t MaxOutlinePixels = 4096;
 constexpr size_t MaxOutlineSpriteWidth = 253;
 using OutlinePixels = StaticVector<PointOf<uint8_t>, MaxOutlinePixels>;
@@ -411,11 +429,16 @@ void RenderClxOutline(const Surface &out, Point position, ClxSprite sprite, uint
 	if (position.x >= 0 && position.x + sprite.width() + 2 < out.w()
 	    && position.y >= 0 && position.y + sprite.height() + 2 < out.h()) {
 		for (const auto &[x, y] : OutlinePixelsCache.outlinePixels) {
-			*out.at(position.x + x, position.y + y) = color;
+			uint8_t *dst = out.at(position.x + x, position.y + y);
+			stereo::MarkDepth(dst, 1);
+			*dst = color;
 		}
 	} else {
 		for (const auto &[x, y] : OutlinePixelsCache.outlinePixels) {
-			out.SetPixel(Point(position.x + x, position.y + y), color);
+			const Point point(position.x + x, position.y + y);
+			if (out.InBounds(point))
+				stereo::MarkDepth(out.at(point.x, point.y), 1);
+			out.SetPixel(point, color);
 		}
 	}
 }
@@ -586,17 +609,17 @@ std::string ClxDescribe(ClxSprite clx)
 
 void ClxDraw(const Surface &out, Point position, ClxSprite clx)
 {
-	DoRenderBackwards(out, position, clx.pixelData(), clx.pixelDataSize(), clx.width(), clx.height(), BlitDirect {});
+	DoRenderBackwards(out, position, clx.pixelData(), clx.pixelDataSize(), clx.width(), clx.height(), DepthMarking<BlitDirect> { BlitDirect {} });
 }
 
 void ClxDrawTRN(const Surface &out, Point position, ClxSprite clx, const uint8_t *trn)
 {
-	DoRenderBackwards(out, position, clx.pixelData(), clx.pixelDataSize(), clx.width(), clx.height(), BlitWithMap { trn });
+	DoRenderBackwards(out, position, clx.pixelData(), clx.pixelDataSize(), clx.width(), clx.height(), DepthMarking<BlitWithMap> { BlitWithMap { trn } });
 }
 
 void ClxDrawWithLightmap(const Surface &out, Point position, ClxSprite clx, const Lightmap &lightmap)
 {
-	DoRenderBackwards(out, position, clx.pixelData(), clx.pixelDataSize(), clx.width(), clx.height(), BlitWithLightmap { lightmap });
+	DoRenderBackwards(out, position, clx.pixelData(), clx.pixelDataSize(), clx.width(), clx.height(), DepthMarking<BlitWithLightmap> { BlitWithLightmap { lightmap } });
 }
 
 void ClxDrawBlended(const Surface &out, Point position, ClxSprite clx)

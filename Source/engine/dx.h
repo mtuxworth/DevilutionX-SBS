@@ -21,6 +21,9 @@ extern bool RenderDirectlyToOutputSurface;
 
 extern SDL_Surface *PalSurface;
 
+/** Set before `RenderPresent` when `PalSurface` holds a game frame drawn over the current stereo world snapshot. */
+extern bool StereoFrameHasWorld;
+
 Surface GlobalBackBuffer();
 
 void dx_init();
